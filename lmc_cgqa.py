@@ -1177,7 +1177,7 @@ if __name__== "__main__":
         if args_generator.debug:
             pr_name='test'
         # if not args_generator.debug:
-        run = wandb.init(project=pr_name, notes=args_generator.wand_notes, settings=wandb.Settings(start_method="fork"), reinit=(args_generator.n_runs>1))
+        run = wandb.init(mode='offline', project=pr_name, notes=args_generator.wand_notes, settings=wandb.Settings(start_method="fork"), reinit=(args_generator.n_runs>1))
         if not args_generator.debug:
             wandb.config.update(args_generator, allow_val_change=False)
         set_seed(manualSeed=args_generator.seed)
