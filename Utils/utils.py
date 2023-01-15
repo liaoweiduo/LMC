@@ -95,6 +95,7 @@ def match_dims(mask, dim=0):
     return mask
 
 def set_seed(args=None, manualSeed=None):
+
     assert manualSeed is not None
     #####seed#####
     np.random.seed(manualSeed)

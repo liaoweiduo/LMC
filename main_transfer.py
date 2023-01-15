@@ -618,7 +618,8 @@ def train(args:ArgsGenerator, model, task_idx, train_loader_current, test_loader
     return model,test_acc,valid_acc,fim_prev
 
 def main(args:ArgsGenerator, task_gen:TaskGenerator):              
-    t = task_gen.add_task()  
+    t = task_gen.add_task()
+
     model=init_model(args, args.gating, n_classes=t.n_classes.item(),  i_size=t.x_dim[-1]) 
 
     ##############################

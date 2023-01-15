@@ -281,6 +281,15 @@ class LMC_net(ModularBaseNet):
         if self.args.regime=='normal':  
             self.optimizer, self.optimizer_structure = self.get_optimizers()
 
+    def reinit_output_head(self, num_classes=None):
+        self.args.multihead = 'none'
+        num_classes = self.num_classes if num_classes is None else num_classes
+
+        self.decoder = nn.Linear(self.representation_dim, num_classes).to(device)
+
+        if self.args.regime=='normal':
+            self.optimizer, self.optimizer_structure = self.get_optimizers()
+
     @property
     def projection_phase(self):      
         if self._steps_since_last_addition>=self.args.projection_phase_length:
