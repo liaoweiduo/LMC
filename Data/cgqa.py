@@ -407,7 +407,7 @@ def _get_gqa_datasets(
 
     :return data_sets defined by json file and label information.
     """
-    img_folder_path = os.path.join(dataset_root, "gqa", "GQA")
+    img_folder_path = os.path.join(dataset_root, "gqa", "gqa")
 
     def preprocess_label_to_integer(img_info, mapping_tuple_label_to_int):
         for item in img_info:
