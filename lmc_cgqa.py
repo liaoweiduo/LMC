@@ -827,13 +827,13 @@ def main(args:ArgsGenerator):
     ####################
 
     '''save model as profile'''
-    model_file = 'model.pth'
+    model_file = 'model_lmc.pth'
     torch.save(model.state_dict(), model_file)
 
-    artifact = wandb.Artifact(f'WeightCheckpoint', type="model")
-    artifact_name = os.path.join("Models", 'WeightCheckpoint.pth')
-    artifact.add_file(model_file, name=artifact_name)
-    wandb.log_artifact(artifact)
+    # artifact = wandb.Artifact(f'WeightCheckpoint', type="model")
+    # artifact_name = os.path.join("Models", 'WeightCheckpoint.pth')
+    # artifact.add_file(model_file, name=artifact_name)
+    # wandb.log_artifact(artifact)
 
     '''few-shot testing'''
 
@@ -1177,7 +1177,6 @@ if __name__== "__main__":
         if args_generator.debug:
             pr_name='test'
         # if not args_generator.debug:      #
-        # wandb.login(key="0e52a75a93e6a5a33f27d7942cc7fcb72d86cef7")   # mode='offline', entity="liaoweiduo",
         run = wandb.init(project=pr_name, notes=args_generator.wand_notes, settings=wandb.Settings(start_method="fork"), reinit=(args_generator.n_runs>1))
         if not args_generator.debug:
             wandb.config.update(args_generator, allow_val_change=False)
