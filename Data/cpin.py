@@ -14,6 +14,7 @@ import json
 import numpy as np
 from torchvision import transforms
 
+# Data.Utils
 from Data.Utils import PathsDataset, Subset, Benchmark
 
 """ README
@@ -197,17 +198,17 @@ def continual_training_benchmark(
         )
 
     train_subsets = [
-        obtain_subset(train_set, expidx, memory_size)
+        obtain_subset(train_set, expidx, memory_size, train_transform)
         for expidx in range(n_experiences)
     ]
 
     val_subsets = [
-        obtain_subset(val_set, expidx, 0)
+        obtain_subset(val_set, expidx, 0, eval_transform)
         for expidx in range(n_experiences)
     ]
 
     test_subsets = [
-        obtain_subset(test_set, expidx, 0)
+        obtain_subset(test_set, expidx, 0, eval_transform)
         for expidx in range(n_experiences)
     ]
 
@@ -541,24 +542,28 @@ __all__ = ["continual_training_benchmark", "fewshot_testing_benchmark"]
 
 
 if __name__ == "__main__":
+    import torch
     '''Continual'''
     # _dataset, _label_info = _get_pin_datasets('../../datasets', mode='continual')
 
-    # _benchmark_instance = continual_training_benchmark(
-    #     n_experiences=10, return_task_id=True,
-    #     seed=1234, shuffle=True,
-    #     dataset_root='../../datasets',
-    #     # memory_size=1000,
-    # )
+    _benchmark_instance = continual_training_benchmark(
+        n_experiences=10, return_task_id=True,
+        seed=1234, shuffle=True,
+        dataset_root='../../datasets',
+        # memory_size=1000,
+    )
+    loader = torch.utils.data.DataLoader(_benchmark_instance.train_datasets[0], batch_size=1000, shuffle=True, pin_memory=True)
+    for bi, batch in enumerate(loader):
+        print(bi)
     # fixed_class_order:
 
     '''Sys'''
     # _dataset, _label_info = _get_gqa_datasets('../../datasets', mode='sys')
-    _benchmark_instance = fewshot_testing_benchmark(
-        n_experiences=5, n_way=10, n_shot=10, n_query=10, mode='noc',
-        task_offset=10,
-        seed=1234, dataset_root='../../datasets',
-    )
+    # _benchmark_instance = fewshot_testing_benchmark(
+    #     n_experiences=5, n_way=10, n_shot=10, n_query=10, mode='noc',
+    #     task_offset=10,
+    #     seed=1234, dataset_root='../../datasets',
+    # )
 
     '''Sub'''
 
