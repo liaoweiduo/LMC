@@ -531,7 +531,7 @@ def main(args:ArgsGenerator):
     model_learned = copy.deepcopy(model_main)
 
     '''test on different mode'''
-    for mode in ['sys', 'pro', 'sub', 'non', 'noc']:
+    for mode in ['sys', 'pro', 'sub', 'non', 'noc']:        # do not contain sub for cpin
         fewshot_test_benchmark = get_benchmark(mode, args)
         n_tasks = fewshot_test_benchmark.n_experiences      # 300
 

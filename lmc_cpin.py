@@ -850,7 +850,7 @@ def main(args:ArgsGenerator):
     state_dict_learned = copy.deepcopy(model.state_dict())
 
     '''test on different mode'''
-    for mode in ['sys', 'pro', 'sub', 'non', 'noc']:
+    for mode in ['sys', 'pro', 'non', 'noc']:
         fewshot_test_benchmark = get_benchmark(mode, args)
         n_tasks = fewshot_test_benchmark.n_experiences      # 300
 
