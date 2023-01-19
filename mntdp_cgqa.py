@@ -271,7 +271,7 @@ def bn_warmup(model, task_id, test_loader, bn_warmup_steps, **kwargs):
 
 def test_with_bn(model, classes, test_loader, temp, task_id=None, bn_warmup_steps=100):
     model.train()                  
-    automated_module_addition_before=model.args.automated_module_addition
+    automated_module_addition_before=0 # model.args.automated_module_addition
     model.args.automated_module_addition=0
     #warm up the batchnorms
     model = bn_warmup(model, task_id, test_loader, bn_warmup_steps)

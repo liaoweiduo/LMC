@@ -40,6 +40,7 @@ class MNTDP_net(ModularBaseNet):
         searchspace: str = choice('topdown', 'bottomup', default='topdown')
         # if 'True' infers task uysing entropy of the output head
         entropy_task_inf:int = 0
+        automated_module_addition: bool = False
 
     def __init__(self, options:Options = Options(), module_options:conv_block_base.Options=conv_block_base.Options(), i_size: int = 28, channels:int = 1, hidden_size=64, num_classes:int=5):
         super(MNTDP_net, self).__init__(options, i_size, channels, hidden_size, num_classes)
