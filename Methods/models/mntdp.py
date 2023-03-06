@@ -359,6 +359,15 @@ class MNTDP_net(ModularBaseNet):
                 logits_best=torch.stack(logit_pool).max(0)[0]
                 return self.forward_template(logit=logits_best, info={'embeddings':X})#, 'selected_decoder':oh_selected})
 
+    def reinit_output_head(self, num_classes=None):
+        self.args.multihead = 'none'
+        num_classes = self.num_classes if num_classes is None else num_classes
+
+        self.decoder = nn.Linear(self.representation_dim, num_classes).to(device)
+
+        if self.args.regime=='normal':
+            self.optimizer, self.optimizer_structure = self.get_optimizers()
+
 
     def load_state_dict(self, state_dict: Union[Dict[str, torch.Tensor], Dict[str, torch.Tensor]], strict: bool=True):
         #TODO: test this

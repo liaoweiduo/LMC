@@ -70,6 +70,14 @@ class LMC_net(ModularBaseNet):
         #for ablation
         no_projection_phase: int = 0
 
+        # only for vit_block
+        patch_size: int = 16
+        heads: int = 16
+        mlp_dim: int = 512
+        vit_dropout: float = 0.1
+        emb_dropout: float = 0.1
+        pool = 'cls'
+
     def __init__(self, options:Options = Options(), module_options:LMC_conv_block.Options=LMC_conv_block.Options(), i_size: int = 28, channels:int = 1, hidden_size=64, num_classes:int=5):
         super(LMC_net, self).__init__(options, i_size, channels, hidden_size, num_classes)
         
@@ -163,6 +171,38 @@ class LMC_net(ModularBaseNet):
 
     def init_modules(self):
         self.encoder = None
+
+        if self.args.module_type=='vit_block':
+            from einops.layers.torch import Rearrange
+
+            image_height, image_width = (self.i_size, self.i_size)
+            patch_height, patch_width = (self.args.patch_size, self.args.patch_size)
+
+            assert image_height % patch_height == 0 and image_width % patch_width == 0, 'Image dimensions must be divisible by the patch size.'
+
+            num_patches = (image_height // patch_height) * (image_width // patch_width)
+            patch_dim = self.channels * patch_height * patch_width
+            assert self.args.pool in {'cls', 'mean'}, 'pool type must be either cls (cls token) or mean (mean pooling)'
+
+            self.to_patch_embedding = nn.Sequential(
+                Rearrange('b c (h p1) (w p2) -> b (h w) (p1 p2 c)', p1=patch_height, p2=patch_width),
+                # nn.BatchNorm1d(num_patches),
+                nn.LayerNorm(patch_dim),
+                nn.Linear(patch_dim, self.hidden_size),
+                # nn.BatchNorm1d(num_patches),
+                nn.LayerNorm(self.hidden_size),
+            )
+
+            self.pos_embedding = nn.Parameter(torch.randn(1, num_patches + 1, self.hidden_size))
+            self.cls_token = nn.Parameter(torch.randn(1, 1, self.hidden_size))
+            self.dropout = nn.Dropout(self.args.emb_dropout)
+
+            self.pool = self.args.pool
+            self.to_latent = nn.Identity()
+
+            self.mlp_head = nn.Sequential(
+                nn.LayerNorm(self.hidden_size),
+            )
 
         channels_in = self.channels
 
@@ -591,7 +631,19 @@ class LMC_net(ModularBaseNet):
             X = self.encoder(X) 
         if self.args.module_type=='linear':
                 X=X.view(X.size(0), -1)
-        temp = self.args.temp     
+
+        if self.args.module_type=='vit_block':
+            from einops import rearrange, repeat
+
+            x = self.to_patch_embedding(X)
+            b, n, _ = x.shape
+
+            cls_tokens = repeat(self.cls_token, '1 1 d -> b 1 d', b=b)
+            x = torch.cat((cls_tokens, x), dim=1)
+            x += self.pos_embedding[:, :(n + 1)]
+            X = self.dropout(x)
+
+        temp = self.args.temp
 
         if str_prior_temp is not None:  
             str_prior_temp=str_prior_temp           
@@ -814,7 +866,14 @@ class LMC_net(ModularBaseNet):
                 raise NotImplementedError
             #############################################
 
-        X = self.avgpool(X)
+        if self.args.module_type != 'vit_block':
+            X = self.avgpool(X)
+        else:
+            x = X.mean(dim=1) if self.pool == 'mean' else X[:, 0]
+
+            x = self.to_latent(x)
+            X = self.mlp_head(x)
+
         if self.args.multihead!='gated_conv':
             if isinstance(X, Tuple):
                 X=X[0]

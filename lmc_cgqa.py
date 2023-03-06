@@ -5,7 +5,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass
 from typing import List, Optional
 
-import ctrl
+# import ctrl
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
@@ -26,12 +26,13 @@ from Data.Utils import TensorDataset
 from Methods.models.cnn_independent_experts import ExpertMixture
 from Methods.models.LMC import LMC_net
 from Methods.replay import BalancedBuffer, Buffer
-from Utils.ctrl.ctrl.tasks.task_generator import TaskGenerator
+# from Utils.ctrl.ctrl.tasks.task_generator import TaskGenerator
 from Utils.logging_utils import log_wandb
+from Utils.logging_utils import mkdir, model_save, model_load
 from Utils.nngeometry.nngeometry.metrics import FIM
 from Utils.nngeometry.nngeometry.object import PMatDiag, PVector
 from Utils.nngeometry.nngeometry.object.pspace import PMatAbstract
-from Utils.utils import construct_name_ctrl, cosine_rampdown, set_seed
+from Utils.utils import cosine_rampdown, set_seed
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -70,12 +71,12 @@ class ArgsGenerator():
 
     #model related
     hidden_size: int = 64 # hidden size of modules
-    module_type: str = 'conv' #'resnet_block'
+    module_type: str = 'conv' #'resnet_block', 'vit_block'
+    depth: int = 4 #network depth   depth改成9？
     gating: str = choice('experts', 'locspec', default='locspec')
     num_modules: int = 1 # Number of modules per layer
     net_arch: int = choice('none', default='none') # -
     activation_structural: str = choice('sigmoid', 'relu', 'tanh', default='relu') #structural activation
-    depth: int = 4 #network depth
     use_bn: int = 1 #whether to use batchnorm in the modules (for Alexnet architecture should be 0)
     use_structural: int = 1 # if 0 no structural components are used at all (model becomes nonmodular if num_modules =1 )
     ################
@@ -111,9 +112,14 @@ class ArgsGenerator():
     lr: float = 1e-3 # learning rate
     ##############################
     #Logging
+    exp_name: str='exp'
     pr_name: Optional[str]=None #wandb project name
     wand_notes: str = '' #wandb notes
     log_avv_acc: int = 0 # if 'True' calculates the average accuracy over tasks sofar after each task
+    # exp_dir:str = '../LMC-experiments'
+    # data_dir:str = '../datasets'
+    exp_dir:str = '/liaoweiduo/LMC-experiments'
+    data_dir:str = '/liaoweiduo/datasets'
     ##############################
 
     ##############################
@@ -153,8 +159,6 @@ class ArgsGenerator():
     n_heads_decoder: int = 1 #-
     ##############################
 
-    # CGQA setting
-    ##############################
 
     def __post_init__(self):
         if self.task_sequence == 's_ood':
@@ -176,54 +180,6 @@ class ArgsGenerator():
 
 loss_function = nn.CrossEntropyLoss()
 
-def create_dataloader_ctrl(task_gen:TaskGenerator, task, args:ArgsGenerator, split=0,
-                            batch_size=64, num_batches=None, labeled=True, normalize=False, **kwargs):
-    single_head=(args.multihead=='none')
-    normalize=args.normalize_data
-    y = task.get_labels(split=split, prop=0)
-    x = task.get_data(split=split)
-    if labeled:
-        idx = torch.where(y!=-1)
-        y = y[idx]
-        x = x[idx]
-    if num_batches is not None:
-        batch_size=int(len(y)//num_batches)
-    transform=None
-
-    if x.shape[1]<task.x_dim[-1] and args.task_sequence=='s_mnist_svhn':
-        transform = transforms.Compose([ transforms.ToPILImage(),transforms.Resize((task.x_dim[-1],task.x_dim[-1])), ToTensor()])
-    if normalize:
-        if min(task.statistics['mean'])>0 and 'mnist' in str(task.concepts) and 'ood' in args.task_sequence:
-            #if no dimention is completely zeros we use statistics of the complete MNIST dataset (for simplisity) - will be used for task sequence s_ood_bkgrnd_white_digits
-            if transform is None:
-                transform = transforms.Normalize((0.1307,0.1307,0.1307), (0.3081,0.3081,0.3081))
-            else:
-                transform.append(transforms.Normalize((0.1307,0.1307,0.1307), (0.3081,0.3081,0.3081)))
-        else:
-            #we leave dimentions with only 0s to stay only 0s
-            if transform is None:
-                transform = transforms.Normalize(task.statistics['mean'], [s if s>0 else s+1 for s in task.statistics['std']])
-            else:
-                transform.append(transforms.Normalize(task.statistics['mean'], [s if s>0 else s+1  for s in task.statistics['std']]))
-
-    if single_head:
-        # adjust class labels for the single head regime
-        adjust_y=0
-        for t,old_t in enumerate(task_gen.task_pool):
-            if str(old_t.concepts)==str(task.concepts):
-                break
-            else:
-                adjust_y+=old_t.info()['n_classes'][0]
-        y+=adjust_y
-    if args.shuffle_test and split!=0:
-        idx = torch.randperm(x.size(0))
-        x=x[idx]
-        y=y[idx]
-
-    dataset = TensorDataset([x,y], transform)
-    return DataLoader(dataset, batch_size=batch_size, shuffle=(split==0)) #or shuffle_test))
-
-
 def get_benchmark(mode, args:ArgsGenerator):
     """
     return benchmark according to the mode
@@ -235,9 +191,9 @@ def get_benchmark(mode, args:ArgsGenerator):
 
     if mode == 'continual':
         benchmark = continual_training_benchmark(
-            n_experiences=10, return_task_id=return_task_id,
+            n_experiences=args.n_tasks, return_task_id=return_task_id,
             seed=1234, shuffle=True,
-            dataset_root='../datasets',
+            dataset_root=args.data_dir,
         )
     else:
         benchmark = fewshot_testing_benchmark(
@@ -245,18 +201,26 @@ def get_benchmark(mode, args:ArgsGenerator):
             n_way=10, n_shot=10, n_val=5, n_query=10,
             seed=1234,
             task_offset=0,      # reinit classifier, so task id is all 0
-            dataset_root='../datasets')
+            dataset_root=args.data_dir)
     return benchmark
 
 
 def create_dataloader_cgqa(benchmark, task_id, args:ArgsGenerator, batch_size=64):
-    return (DataLoader(benchmark.train_datasets[task_id], batch_size=batch_size, shuffle=True, pin_memory=True),
-            DataLoader(benchmark.val_datasts[task_id], batch_size=batch_size, shuffle=False, pin_memory=True),
-            DataLoader(benchmark.test_datasets[task_id], batch_size=batch_size, shuffle=False, pin_memory=True))
+    return (DataLoader(benchmark.train_datasets[task_id], batch_size=batch_size, shuffle=True, num_workers=10),  #  pin_memory=True
+            DataLoader(benchmark.val_datasts[task_id], batch_size=batch_size, shuffle=False, num_workers=10),
+            DataLoader(benchmark.test_datasets[task_id], batch_size=batch_size, shuffle=False, num_workers=10))
 
 
 def init_model(args:ArgsGenerator, gating='locspec', n_classes=10, i_size=28):
     multihead=args.multihead
+
+    patch_size: int = 16  # only for vit_block
+    # dim: int = 512  # only for vit_block  just hidden size
+    heads: int = 16  # only for vit_block
+    mlp_dim: int = 512  # only for vit_block
+    vit_dropout: float = 0.1  # only for vit_block
+    emb_dropout: float = 0.1  # only for vit_block
+
     from Methods import ModelOptions
     from Methods.models.LMC import LMC_net
     model_options = ModelOptions()
@@ -284,6 +248,13 @@ def init_model(args:ArgsGenerator, gating='locspec', n_classes=10, i_size=28):
     model_options.Module.structure_inv_oh = args.structure_inv_oh
     model_options.Module.use_bn_decoder_oh = args.use_bn_decoder_oh
     model_options.Module.activate_after_str_oh = args.activate_after_str_oh
+
+    # only for vit_block
+    model_options.Module.patch_size = patch_size
+    model_options.Module.heads = heads
+    model_options.Module.mlp_dim = mlp_dim
+    model_options.Module.vit_dropout = vit_dropout
+    model_options.Module.emb_dropout = emb_dropout
     if gating=='locspec':
         model_options.Module.detach_structural=args.detach_structural
         model_options.LMC.no_projection_phase=args.no_projection_phase
@@ -315,6 +286,13 @@ def init_model(args:ArgsGenerator, gating='locspec', n_classes=10, i_size=28):
         model_options.LMC.active_unfreezing=args.active_unfreezing
         model_options.LMC.unfreeze_structural=args.unfreeze_structural
         model_options.LMC.treat_unfreezing_as_addition=args.treat_unfreezing_as_addition
+
+        # only for vit_block
+        model_options.LMC.patch_size = patch_size
+        model_options.LMC.heads = heads
+        model_options.LMC.mlp_dim = mlp_dim
+        model_options.LMC.vit_dropout = vit_dropout
+        model_options.LMC.emb_dropout = emb_dropout
 
         model = LMC_net(model_options.LMC,
                                     model_options.Module,
@@ -654,9 +632,13 @@ def train(args:ArgsGenerator, model, task_idx, train_loader_current, test_loader
         valid_acc=best_valid_acc
     return model,test_acc,valid_acc,fim_prev
 
+
 def main(args:ArgsGenerator):
+    '''makedir of exp'''
+    exp_path = mkdir(os.path.join(args.exp_dir, args.exp_name))
+
     continual_train_benchmark = get_benchmark('continual', args)
-    n_classes = continual_train_benchmark.n_classes
+    n_classes = continual_train_benchmark.n_classes // args.n_tasks
     x_dim = continual_train_benchmark.x_dim        # 3, 98, 98
     model = init_model(args, args.gating, n_classes=n_classes,  i_size=x_dim[-1])
 
@@ -678,18 +660,50 @@ def main(args:ArgsGenerator):
         er_buffer = None
     ##############################
 
+    """If resume, load model and check nun_task_trained"""
+    if os.path.exists(os.path.join(exp_path, 'model.pt')):
+        checkpoint = model_load(os.path.join(exp_path, 'model.pt'))
+        state_dict, learned_task_id = checkpoint['state_dict'], checkpoint['learned_task_id']
+
+        for i in range((learned_task_id+1) if learned_task_id < args.n_tasks else args.n_tasks):      # add heads
+            if args.multihead!='none':
+                model.fix_oh(i)
+                if i < args.n_tasks - 1:     # do not increase for the last task
+                    init_idx=get_oh_init_idx(model, create_dataloader_cgqa(continual_train_benchmark, i+1, args, batch_size=args.batch_size)[0], args)
+                    print('init_idx', init_idx)
+                    model.add_output_head(n_classes, init_idx=init_idx)
+            else:
+                #single head mode: create new, larger head
+                if i < args.n_tasks - 1:
+                    model.add_output_head(model.decoder.out_features+n_classes, state_dict=model.decoder.state_dict())
+
+        model.load_state_dict(state_dict)
+
+    else:
+        learned_task_id = -1    # no task learned
+
     try:
         wandb.watch(model)
     except:
         pass
-    n_tasks=10        # for continual train
+    n_tasks=args.n_tasks        # for continual train
     train_loaders=[]
     test_loaders=[]
     valid_loaders=[]
     test_accuracies_past = []
     valid_accuracies_past = []
     fim_prev=[]
-    for i in range(n_tasks):
+
+    for i in range((learned_task_id+1) if learned_task_id < args.n_tasks else args.n_tasks):  # append valid and test dataset
+        _, valid_dataloader, test_loader_current = create_dataloader_cgqa(
+            continual_train_benchmark, i, args, batch_size=args.batch_size)
+
+        test_loaders.append(test_loader_current)
+        valid_loaders.append(valid_dataloader)
+        test_accuracies_past.append(0)
+        valid_accuracies_past.append(0)
+
+    for i in range(learned_task_id+1, n_tasks):
         print('==='*10)
         print(f'Task train {i}')
         print('==='*10)
@@ -757,6 +771,9 @@ def main(args:ArgsGenerator):
                             # model.add_modules(at_layer=l)
             model.optimizer, model.optimizer_structure = model.get_optimizers()
 
+        '''save model after train 1 task'''
+        model_save(model, args, i, os.path.join(exp_path, 'model.pt'))     # os.path.join(wandb.run.dir, 'model.pt')
+
     if args.regime=='multitask':
         #train
         train_set = torch.utils.data.ConcatDataset([dl.dataset for dl in train_loaders])
@@ -769,66 +786,72 @@ def main(args:ArgsGenerator):
         test_accuracies_past=None
         valid_accuracies_past=None
 
-    #########################
-    # this is for debugging
-    if isinstance(model, LMC_net):
-        if isinstance(model.decoder, nn.ModuleList):
-            for d in model.decoder:
-                if hasattr(d,'weight'):
-                    print(torch.sum(d.weight))
-    #########################
-    accs_test, Fs, masks_test, task_selection_accs = get_accs_for_tasks(model, args, test_loaders, test_accuracies_past, task_agnostic_test=args.task_agnostic_test)
-    for ti, (acc, Frg, task_selection_acc) in enumerate(zip(accs_test, Fs, task_selection_accs)):
-        log_wandb({f'test_acc_{ti}':acc}, prefix='test/')
-        #Forgetting (test)
-        log_wandb({f'F_test_{ti}':Frg}, prefix='test/')
-        #Task selection accuracy (only relevant in not ask id is geven at test time) (test)
-        log_wandb({f'Task_selection_acc{ti}':task_selection_acc}, prefix='test/')
-    ####################
-    #Average accuracy (test) at the end of the sequence
-    print(accs_test)
-    print('Average accuracy (test) at the end of the sequence:',np.mean(accs_test))
-    log_wandb({"mean_test_acc":np.mean(accs_test)})#, prefix='test/')
-    #Average forgetting (test)
-    log_wandb({"mean_test_F":np.mean(Fs)})#, prefix='test/')
-    ####################
-    #Masks / Module usage
-    if len(masks_test)>0 and args.gating=='locspec':
-        pyplot.clf()
-        fig, axs = pyplot.subplots(1,len(test_loaders),figsize=(15,4))
-        for i, ax in enumerate(axs):
-            im = sns.heatmap(F.normalize(masks_test[i].cpu().T, p=1, dim=0), vmin=0, vmax=1, cmap='Blues', cbar=False, ax=ax, xticklabels=[0,1,2,3])
-            ax.set_title(f'Task {i}')
-            for _, spine in im.spines.items():
-                spine.set_visible(True)
-        pyplot.setp(axs[:], xlabel=f'layer')
-        pyplot.setp(axs[0], ylabel='module')
-        log_wandb({f"module usage": wandb.Image(fig)})
-        if args.save_figures:
-            for i in range(len(masks_test)):
-                print(masks_test[i].cpu().T)
-            for i in range(len(masks_test)):
-                print(F.normalize(masks_test[i].cpu().T, p=1, dim=0))
-            fig.savefig(f'module_selection_{args.task_sequence}.pdf', format='pdf', dpi=300)
-    ####################
-    accs_valid, Fs_valid, _, task_selection_accs = get_accs_for_tasks(model, args, valid_loaders, valid_accuracies_past, task_agnostic_test=args.task_agnostic_test)
-    for ti, (acc, Frg, task_selection_acc) in enumerate(zip(accs_valid, Fs_valid, task_selection_accs)):
-        log_wandb({f'valid_acc_{ti}':acc}, prefix='valid/')
-        #Forgetting (valid)
-        log_wandb({f'F_valid_{ti}':Frg}, prefix='valid/')
-        #Task selection accuracy (only relevant in not ask id is geven at test time)(valid)
-        log_wandb({f'Task_selection_acc{ti}':task_selection_acc}, prefix='valid/')
-    ####################
-    print('Average accuracy (valid) at the end of the sequence:',np.mean(accs_valid))
-    #Average accuracy (valid) at the end of the sequence
-    log_wandb({"mean_valid_acc":np.mean(accs_valid)})#, prefix='valid/')
-    #Average forgetting (valid)
-    log_wandb({"mean_valid_F":np.mean(Fs_valid)})#, prefix='test/')
-    ####################
+    if learned_task_id < n_tasks - 1:   # just finish continual train. need to do test
+        #########################
+        # this is for debugging
+        if isinstance(model, LMC_net):
+            if isinstance(model.decoder, nn.ModuleList):
+                for d in model.decoder:
+                    if hasattr(d,'weight'):
+                        print(torch.sum(d.weight))
+        #########################
 
-    '''save model as profile'''
-    model_file = 'model_lmc.pth'
-    torch.save(model.state_dict(), model_file)
+        accs_test, Fs, masks_test, task_selection_accs = get_accs_for_tasks(model, args, test_loaders, test_accuracies_past, task_agnostic_test=args.task_agnostic_test)
+        for ti, (acc, Frg, task_selection_acc) in enumerate(zip(accs_test, Fs, task_selection_accs)):
+            log_wandb({f'test_acc_{ti}':acc}, prefix='test/')
+            #Forgetting (test)
+            log_wandb({f'F_test_{ti}':Frg}, prefix='test/')
+            #Task selection accuracy (only relevant in not ask id is geven at test time) (test)
+            log_wandb({f'Task_selection_acc{ti}':task_selection_acc}, prefix='test/')
+        ####################
+        #Average accuracy (test) at the end of the sequence
+        print(accs_test)
+
+        '''save results'''
+        np.save(os.path.join(exp_path, f'results-continual.npy'), np.array(accs_test))
+
+        print('Average accuracy (test) at the end of the sequence:',np.mean(accs_test))
+        log_wandb({"mean_test_acc":np.mean(accs_test)})#, prefix='test/')
+        #Average forgetting (test)
+        log_wandb({"mean_test_F":np.mean(Fs)})#, prefix='test/')
+        ####################
+        #Masks / Module usage
+        if len(masks_test)>0 and args.gating=='locspec':
+            pyplot.clf()
+            fig, axs = pyplot.subplots(1,len(test_loaders),figsize=(15,4))
+            for i, ax in enumerate(axs):
+                im = sns.heatmap(F.normalize(masks_test[i].cpu().T, p=1, dim=0), vmin=0, vmax=1, cmap='Blues', cbar=False, ax=ax, xticklabels=[0,1,2,3])
+                ax.set_title(f'Task {i}')
+                for _, spine in im.spines.items():
+                    spine.set_visible(True)
+            pyplot.setp(axs[:], xlabel=f'layer')
+            pyplot.setp(axs[0], ylabel='module')
+            log_wandb({f"module usage": wandb.Image(fig)})
+            if args.save_figures:
+                for i in range(len(masks_test)):
+                    print(masks_test[i].cpu().T)
+                for i in range(len(masks_test)):
+                    print(F.normalize(masks_test[i].cpu().T, p=1, dim=0))
+                fig.savefig(f'module_selection_{args.task_sequence}.pdf', format='pdf', dpi=300)
+        ####################
+        accs_valid, Fs_valid, _, task_selection_accs = get_accs_for_tasks(model, args, valid_loaders, valid_accuracies_past, task_agnostic_test=args.task_agnostic_test)
+        for ti, (acc, Frg, task_selection_acc) in enumerate(zip(accs_valid, Fs_valid, task_selection_accs)):
+            log_wandb({f'valid_acc_{ti}':acc}, prefix='valid/')
+            #Forgetting (valid)
+            log_wandb({f'F_valid_{ti}':Frg}, prefix='valid/')
+            #Task selection accuracy (only relevant in not ask id is geven at test time)(valid)
+            log_wandb({f'Task_selection_acc{ti}':task_selection_acc}, prefix='valid/')
+        ####################
+        print('Average accuracy (valid) at the end of the sequence:',np.mean(accs_valid))
+        #Average accuracy (valid) at the end of the sequence
+        log_wandb({"mean_valid_acc":np.mean(accs_valid)})#, prefix='valid/')
+        #Average forgetting (valid)
+        log_wandb({"mean_valid_F":np.mean(Fs_valid)})#, prefix='test/')
+        ####################
+
+    # '''save model as profile'''
+    # model_file = f'{args.exp_dir}/model_lmc.pth'
+    # torch.save(model.state_dict(), model_file)
 
     # artifact = wandb.Artifact(f'WeightCheckpoint', type="model")
     # artifact_name = os.path.join("Models", 'WeightCheckpoint.pth')
@@ -850,7 +873,10 @@ def main(args:ArgsGenerator):
     state_dict_learned = copy.deepcopy(model.state_dict())
 
     '''test on different mode'''
-    for mode in ['sys', 'pro', 'sub', 'non', 'noc']:
+    for mode_id, mode in enumerate(['sys', 'pro', 'sub', 'non', 'noc']):    # 10, 11, 12, 13, 14
+        if mode_id + n_tasks <= learned_task_id:                 # pass finished mode
+            pass
+
         fewshot_test_benchmark = get_benchmark(mode, args)
         n_tasks = fewshot_test_benchmark.n_experiences      # 300
 
@@ -883,261 +909,12 @@ def main(args:ArgsGenerator):
         log_wandb({f'{mode}/95ci_test_acc': 1.96 * (np.std(test_accuracies) / np.sqrt(n_tasks))})
         log_wandb({f'{mode}/95ci_valid_acc': 1.96 * (np.std(valid_accuracies) / np.sqrt(n_tasks))})
 
-    return None
+        '''save model'''
+        model_save(None, args, mode_id + n_tasks, os.path.join(exp_path, 'model.pt'))
 
-def main_old(args:ArgsGenerator, task_gen:TaskGenerator):
-    t = task_gen.add_task()
-    model=init_model(args, args.gating, n_classes=t.n_classes.item(),  i_size=t.x_dim[-1])
+        '''save results'''
+        np.save(os.path.join(exp_path, f'results-{mode}.npy'), np.array(test_accuracies))
 
-    ##############################
-    #Replay Buffer
-    if args.replay_capacity!=0:
-        rng = np.random.RandomState(args.seed)
-        if args.replay_capacity<0:
-            #automatically calculating the replay capacity to match the maximal LMC size in case of linear growth
-            # memory of a float (24 bytes) x number of parameters in LMC with 1 module per layer x number of tasks = bytes of the worst case LMC
-            net_size = 24 * sum([np.prod(p.size()) for p in model.parameters()]) * args.n_tasks
-            # we assume that 1 pixel can be stored using 1 byte of memory
-            args.replay_capacity = net_size // np.prod(t.x_dim)
-        er_buffer=BalancedBuffer(args.replay_capacity,
-                        input_shape=t.x_dim,
-                        extra_buffers={"t": torch.LongTensor},
-                        rng=rng).to(device)
-    else:
-        er_buffer = None
-    ##############################
-
-    try:
-        wandb.watch(model)
-    except:
-        pass
-    n_tasks=args.n_tasks
-    train_loaders=[]
-    test_loaders=[]
-    valid_loaders=[]
-    test_accuracies_past = []
-    valid_accuracies_past = []
-    fim_prev=[]
-    for i in range(n_tasks):
-        print('==='*10)
-        print(f'Task train {i}, Classes: {t.concepts}')
-        print('==='*10)
-        train_loader_current, valid_dataloader, test_loader_current = create_dataloader_ctrl(task_gen, t, args,0, batch_size=args.batch_size, labeled=True, task_n=i), create_dataloader_ctrl(task_gen, t, args,1,args.batch_size, labeled=True, shuffle_test=('ood' in args.task_sequence), task_n=i), create_dataloader_ctrl(task_gen, t, args,2,args.batch_size, labeled=True, shuffle_test=('ood' in args.task_sequence), task_n=i)
-        if args.regime=='cl':
-            model,test_acc,valid_acc,fim_prev = train(args,model,i,train_loader_current,test_loader_current,valid_dataloader,fim_prev,er_buffer)
-
-            test_accuracies_past.append(test_acc)
-            valid_accuracies_past.append(valid_acc)
-            test_loaders.append(test_loader_current)
-            valid_loaders.append(valid_dataloader)
-            ####################
-            #Logging
-            ####################
-            #Current accuracy
-            log_wandb({f'test/test_acc_{i}':test_acc})
-            log_wandb({f'valid/valid_acc_{i}':valid_acc})
-            #Avv acc sofar (A)
-            if args.log_avv_acc:
-                accs, _, _,_ = get_accs_for_tasks(model, args, test_loaders, task_agnostic_test=args.task_agnostic_test)
-                log_wandb({f'test/avv_test_acc_sofar':np.mean(accs+[test_acc])})
-                accs_valid, _, _,_ = get_accs_for_tasks(model, args, valid_loaders, task_agnostic_test=args.task_agnostic_test)
-                log_wandb({f'test/avv_test_acc_sofar':np.mean(accs_valid+[valid_acc])})
-        elif args.regime=='multitask':
-                #collect data first
-                train_loaders.append(train_loader_current)
-                test_loaders.append(test_loader_current)
-                valid_loaders.append(valid_dataloader)
-        #Model
-        n_modules = torch.tensor(model.n_modules).cpu().numpy()
-        log_wandb({'total_modules': np.sum(np.array(n_modules))}, prefix='model/')
-        ####################
-        #Get new task
-        try:
-            t = task_gen.add_task()
-        except:
-            print(i)
-            break
-        if args.task_sequence=='s_long30' and i==30:
-            print(i)
-            break
-        #fix previous output head
-        if isinstance(model, LMC_net):
-            if isinstance(model.decoder, nn.ModuleList):
-                if hasattr(model.decoder[i],'weight'):
-                    print(torch.sum(model.decoder[i].weight))
-
-        if args.multihead!='none':
-            model.fix_oh(i)
-            init_idx=get_oh_init_idx(model, create_dataloader_ctrl(task_gen, t, args,0,batch_size=args.batch_size, labeled=True, task_n=i), args)
-            print('init_idx', init_idx)
-            model.add_output_head(t.n_classes.item(), init_idx=init_idx)
-        else:
-            #single head mode: create new, larger head
-            model.add_output_head(model.decoder.out_features+t.n_classes.item(), state_dict=model.decoder.state_dict())
-
-        if args.gating not in ['experts']:
-            for l in range(len(n_modules)):
-                log_wandb({f'total_modules_l{l}': n_modules[l]}, prefix='model/')
-            if args.use_structural:
-                if args.use_backup_system:
-                    model.freeze_permanently_structure()
-                else:
-                    for l,layer in enumerate(model.components):
-                        for m in layer:
-                            m.freeze_functional(inner_loop_free=False)
-                            m.freeze_structural()
-                            m.module_learned=torch.tensor(1.)
-                            # model.add_modules(at_layer=l)
-            model.optimizer, model.optimizer_structure = model.get_optimizers()
-
-    if args.regime=='multitask':
-        #train
-        train_set = torch.utils.data.ConcatDataset([dl.dataset for dl in train_loaders])
-        test_set = torch.utils.data.ConcatDataset([dl.dataset for dl in test_loaders])
-        valid_set = torch.utils.data.ConcatDataset([dl.dataset for dl in valid_loaders])
-        train_loader = DataLoader(dataset=train_set, batch_size=args.batch_size, shuffle=1)
-        test_loader = DataLoader(dataset=test_set, batch_size=args.batch_size, shuffle=1)
-        valid_loader = DataLoader(dataset=valid_set, batch_size=args.batch_size, shuffle=1)
-        model,test_acc,valid_acc,_ = train(args,model,0,train_loader,test_loader,valid_loader,None,None,None)
-        test_accuracies_past=None
-        valid_accuracies_past=None
-
-    #########################
-    # this is for debugging
-    if isinstance(model, LMC_net):
-        if isinstance(model.decoder, nn.ModuleList):
-            for d in model.decoder:
-                if hasattr(d,'weight'):
-                    print(torch.sum(d.weight))
-    #########################
-    accs_test, Fs, masks_test, task_selection_accs = get_accs_for_tasks(model, args, test_loaders, test_accuracies_past, task_agnostic_test=args.task_agnostic_test)
-    for ti, (acc, Frg, task_selection_acc) in enumerate(zip(accs_test, Fs, task_selection_accs)):
-        log_wandb({f'test_acc_{ti}':acc}, prefix='test/')
-        #Forgetting (test)
-        log_wandb({f'F_test_{ti}':Frg}, prefix='test/')
-        #Task selection accuracy (only relevant in not ask id is geven at test time) (test)
-        log_wandb({f'Task_selection_acc{ti}':task_selection_acc}, prefix='test/')
-    ####################
-    #Average accuracy (test) at the end of the sequence
-    print(accs_test)
-    print('Average accuracy (test) at the end of the sequence:',np.mean(accs_test))
-    log_wandb({"mean_test_acc":np.mean(accs_test)})#, prefix='test/')
-    #Average forgetting (test)
-    log_wandb({"mean_test_F":np.mean(Fs)})#, prefix='test/')
-    ####################
-    #Masks / Module usage
-    if len(masks_test)>0 and args.gating=='locspec':
-        pyplot.clf()
-        fig, axs = pyplot.subplots(1,len(test_loaders),figsize=(15,4))
-        for i, ax in enumerate(axs):
-            im = sns.heatmap(F.normalize(masks_test[i].cpu().T, p=1, dim=0), vmin=0, vmax=1, cmap='Blues', cbar=False, ax=ax, xticklabels=[0,1,2,3])
-            ax.set_title(f'Task {i}')
-            for _, spine in im.spines.items():
-                spine.set_visible(True)
-        pyplot.setp(axs[:], xlabel=f'layer')
-        pyplot.setp(axs[0], ylabel='module')
-        log_wandb({f"module usage": wandb.Image(fig)})
-        if args.save_figures:
-            for i in range(len(masks_test)):
-                print(masks_test[i].cpu().T)
-            for i in range(len(masks_test)):
-                print(F.normalize(masks_test[i].cpu().T, p=1, dim=0))
-            fig.savefig(f'module_selection_{args.task_sequence}.pdf', format='pdf', dpi=300)
-    ####################
-    accs_valid, Fs_valid, _, task_selection_accs = get_accs_for_tasks(model, args, valid_loaders, valid_accuracies_past, task_agnostic_test=args.task_agnostic_test)
-    for ti, (acc, Frg, task_selection_acc) in enumerate(zip(accs_valid, Fs_valid, task_selection_accs)):
-        log_wandb({f'valid_acc_{ti}':acc}, prefix='valid/')
-        #Forgetting (valid)
-        log_wandb({f'F_valid_{ti}':Frg}, prefix='valid/')
-        #Task selection accuracy (only relevant in not ask id is geven at test time)(valid)
-        log_wandb({f'Task_selection_acc{ti}':task_selection_acc}, prefix='valid/')
-    ####################
-    print('Average accuracy (valid) at the end of the sequence:',np.mean(accs_valid))
-    #Average accuracy (valid) at the end of the sequence
-    log_wandb({"mean_valid_acc":np.mean(accs_valid)})#, prefix='valid/')
-    #Average forgetting (valid)
-    log_wandb({"mean_valid_F":np.mean(Fs_valid)})#, prefix='test/')
-    ####################
-
-    if args.task_sequence_test is not None and 'ood' in args.task_sequence:
-        #test on all combinations of features and classes
-        state_dict_learned=model.state_dict()
-        task_gen_test = ctrl.get_stream(args.task_sequence_test, seed=args.stream_seed)
-        classes=[]
-        transformations=[]
-        task_id = -1
-        accuracies=[]
-        accuracies_valid=[]
-        masks_test=[]
-
-        for i, t in enumerate(task_gen_test):
-            model.load_state_dict(state_dict_learned)
-            classes_name = str([int(s) for s in str(t.concepts).split() if s.isdigit()])
-            if len(classes)==0 or classes[-1]!=classes_name:
-                #task witched
-                task_id+=1
-            print(f'Task {i}, Classes: {t.concepts}')
-            print(t.transformation.trans_descr)
-            print(f"Task id {task_id}")
-            classes.append(classes_name)
-            descr=t.transformation.trans_descr.split('->')[-1]
-            name=construct_name_ctrl(descr)
-            transformations.append(name)#t.transformation.trans_descr.split('->')[-1])
-            loader_valid, loader_test = create_dataloader_ctrl(task_gen, t, args,1, batch_size=args.batch_size, labeled=True, task_n=i), create_dataloader_ctrl(task_gen, t, args,2, batch_size=args.batch_size, labeled=True, task_n=i)
-            test_acc, _, mask = test_with_bn(model, None, loader_test, model.min_temp, model.min_str_prior_temp, task_id=task_id if not args.task_agnostic_test else None, bn_warmup_steps=200)
-            test_acc=test_acc.cpu().item()
-            try:
-                masks_test.append(mask.detach())
-            except:
-                masks_test.append(mask)
-            valid_acc = test_with_bn(model, None, loader_valid, model.min_temp, model.min_str_prior_temp, task_id=task_id if not args.task_agnostic_test else None, bn_warmup_steps=100)[0].cpu().item()
-            accuracies.append(test_acc)
-            accuracies_valid.append(valid_acc)
-
-        log_wandb({f"mean_test_ood": np.mean(accuracies)})
-        log_wandb({f"mean_valid_ood": np.mean(accuracies_valid)})
-        array=[]
-        array_valid=[]
-        indexes = np.unique(transformations, return_index=True)[1]
-        unique_transformations = [transformations[index] for index in sorted(indexes)]
-        for tr in unique_transformations:
-            results_for_transform=[]
-            results_for_transform_valid=[]
-            for i, tr2 in enumerate(transformations):
-                if tr==tr2:
-                    results_for_transform.append(accuracies[i])
-                    results_for_transform_valid.append(accuracies_valid[i])
-            array.append(results_for_transform)
-            array_valid.append(results_for_transform_valid)
-        ####################
-        #Masks / Module usage ood
-        if len(masks_test)>0 and args.gating=='locspec':
-            fig, axs = pyplot.subplots(len(unique_transformations),len(np.unique(classes)),figsize=(10,2*len(unique_transformations)))
-            fig.tight_layout(pad=2.5)
-            for row, ax_row in enumerate(axs):
-                for column, ax in enumerate(ax_row):
-                    im = ax.imshow(masks_test[column*len(axs)+row].cpu().T, cmap='Blues')
-                    ax.set_title(unique_transformations[row].replace('\n', ''))
-                    ax.set_yticks([0,1,2,3,4])
-                    ax.set_xticks([0,1,2,3])
-                    if row == column:
-                        for spine in ax.spines.values():
-                            spine.set_edgecolor('red')#, linewidth=2)
-            # set labels
-            for i,cl in enumerate(np.unique(classes)):
-                plt.setp(axs[-1, i], xlabel=f'layer\nClasses {cl}')
-            plt.setp(axs[:, 0], ylabel='module')
-            pyplot.savefig('module_selection.pdf', format='pdf',dpi=300, bbox_inches='tight')
-
-            log_wandb({f"ood/module_usage": wandb.Image(fig)})
-
-        col = np.unique(classes)
-        df_cm = pd.DataFrame(array[:len(col)], index = unique_transformations[:len(col)],columns = np.unique(classes))
-
-        log_wandb({f"mean_test_ood": np.mean(array[:len(col)])})
-        log_wandb({f"mean_valid_ood": np.mean(array_valid[:len(col)])})
-        plot_confusion(df_cm, wandb_tag='confusion_matrix')
-        return df_cm
     return None
 
 def plot_confusion(df_cm, wandb_tag=None, save_dir=None, labels=None):
@@ -1177,7 +954,7 @@ if __name__== "__main__":
         if args_generator.debug:
             pr_name='test'
         # if not args_generator.debug:      #
-        run = wandb.init(project=pr_name, notes=args_generator.wand_notes, settings=wandb.Settings(start_method="fork"), reinit=(args_generator.n_runs>1))
+        run = wandb.init(project=pr_name, dir=f"{args_generator.exp_dir}", notes=args_generator.wand_notes, settings=wandb.Settings(start_method="fork"), reinit=(args_generator.n_runs>1))
         if not args_generator.debug:
             wandb.config.update(args_generator, allow_val_change=False)
         set_seed(manualSeed=args_generator.seed)

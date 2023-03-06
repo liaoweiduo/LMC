@@ -179,7 +179,7 @@ class Decoder(nn.Module):
             else:
                 kernel_size2=kernel_size  
             stride=2
-            if module_type =='linear':
+            if module_type =='linear' or module_type == 'resnet_block' or module_type == 'vit_block':
                 padding=0
                 stride=1    
                 kernel_size=2
@@ -279,7 +279,7 @@ class Decoder(nn.Module):
                 structural_out += self.criterion(dd, self.activation_target(x_in.detach())).view(n, -1).mean(-1)
             d=torch.stack(d).mean(0)
         else:
-            d = self.decoder(e)
+            d = self.decoder(e)         # resnet_block: d (befor module) (64, 3, 254, 254), e (after module) (64, 512, 128, 128) x_in (64, 3, 128, 128); conv: d (64, 3, 128, 128), e (64, 64, 65, 65) x_in (64, 3, 128, 128)
             structural_out = self.criterion(d, self.activation_target(x_in.detach())).view(n, -1).mean(-1)
 
         if self.module_type=='linear':

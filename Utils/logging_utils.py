@@ -370,3 +370,43 @@ class TqdmLoggingHandler(logging.Handler):
             raise
         except:
             self.handleError(record)  
+
+
+def mkdir(path):
+    if not os.path.exists(path):
+        os.makedirs(path)
+    return path
+
+
+def model_save(model, args, learned_task_id, path):
+    if model is None:
+        # load from path and resave
+        checkpoint = model_load(path)
+        model_state_dict = checkpoint['state_dict']
+    else:
+        model_state_dict = model.state_dict()
+
+    # path=os.path.join(wandb.run.dir, 'model.pt')
+
+    save_dict = {
+        'state_dict': model_state_dict,
+        'args': vars(args),
+        'learned_task_id': learned_task_id,
+    }
+    if model is not None and hasattr(model, 'structure_pool'):
+        save_dict['structure_pool'] = model.structure_pool
+
+    torch.save(save_dict, path)
+
+
+def model_load(path):
+    checkpoint = torch.load(path, map_location=torch.device(device))
+    model_state_dict = checkpoint['state_dict']
+    load_dict = {'state_dict': model_state_dict,
+                 'learned_task_id': checkpoint['learned_task_id']
+                 }
+
+    if 'structure_pool' in checkpoint.keys():
+        load_dict['structure_pool'] = checkpoint['structure_pool']
+
+    return load_dict

@@ -1,0 +1,12 @@
+{
+    "Token": "bv3uQFYl4YCVLkWfEcfLsQ",
+    "business_flag": "AILab_MLC_CQ",
+    "start_cmd": "sh lmc_cgqa_tencent.sh",
+    "model_local_file_path": "/apdcephfs/private_yunqiaoyang/private_weiduoliao/LMC/",
+    "host_num": 1,
+    "host_gpu_num": 1,
+    "GPUName": "V100",
+    "is_elasticity": true,
+    "mount_ceph_business_flag": "DrugAI_CQ",
+    "image_full_name": "mirrors.tencent.com/yunqiao_cv/liaoweiduo:lmc1"
+}

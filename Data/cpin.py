@@ -10,73 +10,31 @@ import os
 from pathlib import Path
 from typing import Optional, Sequence, Union, Any, Dict, List
 import json
+from PIL import Image
 
 import numpy as np
 from torchvision import transforms
+from torchvision.transforms.functional import crop
+import torch
+from torch import Tensor
 
-# Data.Utils
-from Data.Utils import PathsDataset, Subset, Benchmark
 
 """ README
-
-[PREPROCESS INSTRUCTIONS] 
-Please first download our preprocessed CPIN dataset in 
-https://drive.google.com/file/d/1JrgA6ZRm8vrPRCPnr2bOSRblRU7zYVQK/view
-
-Then unzip and place the folder under dataset_root/gqa folder.
-
-Folder structure:
--/ continual
-    -/ train/val/test
-        -/ comb_name (sort and ',')
--/ fewshot
-    -/ sys/pro/non/noc
-        -/ comb_name (sort and ',')
--/ statistics.json
-    - same dict structure as folder (sub with attr)
-    
 The original labels of classes are the sorted combination of all existing
 objects defined in json. E.g., "apple,banana".
 """
 
 
-"""
-Default transforms borrowed from MetaShift.
-Image shape: (3, 98, 98). 
-Imagenet normalization.
-"""
-_image_size = (98, 98)
-_default_cgqa_train_transform = transforms.Compose(
-    [
-        transforms.Resize(_image_size),  # allow reshape but not equal scaling
-        transforms.RandomHorizontalFlip(),
-        transforms.ToTensor(),
-        transforms.Normalize(
-            mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
-        ),
-    ]
-)
-
-_default_cgqa_eval_transform = transforms.Compose(
-    [
-        transforms.Resize(_image_size),
-        transforms.ToTensor(),
-        transforms.Normalize(
-            mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
-        ),
-    ]
-)
-
-
 def continual_training_benchmark(
         n_experiences: int,
         *,
+        image_size=(128, 128),
         return_task_id=False,
         seed: Optional[int] = None,
         fixed_class_order: Optional[Sequence[int]] = None,
         shuffle: bool = True,
-        train_transform: Optional[Any] = _default_cgqa_train_transform,
-        eval_transform: Optional[Any] = _default_cgqa_eval_transform,
+        train_transform: Optional[Any] = None,
+        eval_transform: Optional[Any] = None,
         dataset_root: Union[str, Path] = None,
         memory_size: int = 0,
 ):
@@ -96,6 +54,7 @@ def continual_training_benchmark(
         'Bird Foot']
 
     :param n_experiences: The number of experiences in the current benchmark.
+    :param image_size: size of image.
     :param return_task_id: If True, a progressive task id is returned for every
         experience. If False, all experiences will have a task ID of 0.
     :param seed: A valid int used to initialize the random number generator.
@@ -128,10 +87,38 @@ def continual_training_benchmark(
         with train_stream, val_stream, test_stream.
     """
     if dataset_root is None:
-        dataset_root = './cpin'
+        dataset_root =  './cpin'
+
+    '''
+    Default transforms borrowed from MetaShift.
+    Imagenet normalization.
+    '''
+    _default_cgqa_train_transform = transforms.Compose(
+        [
+            transforms.Resize(image_size),  # allow reshape but not equal scaling
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize(
+                mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
+            ),
+        ]
+    )
+    _default_cgqa_eval_transform = transforms.Compose(
+        [
+            transforms.Resize(image_size),
+            transforms.ToTensor(),
+            transforms.Normalize(
+                mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
+            ),
+        ]
+    )
+    if train_transform is None:
+        train_transform = _default_cgqa_train_transform
+    if eval_transform is None:
+        eval_transform = _default_cgqa_eval_transform
 
     '''load datasets'''
-    datasets, label_info = _get_pin_datasets(dataset_root, mode='continual')
+    datasets, label_info = _get_pin_datasets(dataset_root, mode='continual', image_size=image_size)
     train_set, val_set, test_set = datasets['train'], datasets['val'], datasets['test']
     label_set, map_tuple_label_to_int, map_int_label_to_tuple = label_info
 
@@ -188,7 +175,6 @@ def continual_training_benchmark(
         indices = np.concatenate(indices)
         task_labels = np.concatenate(task_labels)
         assert indices.shape[0] == task_labels.shape[0]
-
         return Subset(
             dataset,
             indices=indices,
@@ -223,7 +209,7 @@ def continual_training_benchmark(
     benchmark_instance.class_mappings = class_mappings
     benchmark_instance.n_classes = num_classes
     benchmark_instance.label_info = label_info
-    benchmark_instance.x_dim = (3, *_image_size)    # (3, 98, 98)
+    benchmark_instance.x_dim = (3, *image_size)    # (3, 98, 98)
     benchmark_instance.n_experiences = n_experiences
 
     return benchmark_instance
@@ -232,6 +218,7 @@ def continual_training_benchmark(
 def fewshot_testing_benchmark(
         n_experiences: int,
         *,
+        image_size=(128, 128),
         n_way: int = 10,
         n_shot: int = 10,
         n_val: int = 5,
@@ -240,8 +227,8 @@ def fewshot_testing_benchmark(
         task_offset: int = 10,
         seed: Optional[int] = None,
         fixed_class_order: Optional[Sequence[int]] = None,
-        train_transform: Optional[Any] = _default_cgqa_train_transform,
-        eval_transform: Optional[Any] = _default_cgqa_eval_transform,
+        train_transform: Optional[Any] = None,
+        eval_transform: Optional[Any] = None,
         dataset_root: Union[str, Path] = None,
 ):
     """
@@ -251,6 +238,7 @@ def fewshot_testing_benchmark(
 
     :param n_experiences: The number of experiences in the current benchmark.
         In the fewshot setting, it means the number of few-shot tasks
+    :param image_size: size of image.
     :param n_way: Number of ways for few-shot tasks.
     :param n_shot: Number of support image instances for each class.
     :param n_val: Number of evaluation image instances for each class.
@@ -286,8 +274,36 @@ def fewshot_testing_benchmark(
     if dataset_root is None:
         dataset_root = './cpin'
 
+    '''
+    Default transforms borrowed from MetaShift.
+    Imagenet normalization.
+    '''
+    _default_cgqa_train_transform = transforms.Compose(
+        [
+            transforms.Resize(image_size),  # allow reshape but not equal scaling
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize(
+                mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
+            ),
+        ]
+    )
+    _default_cgqa_eval_transform = transforms.Compose(
+        [
+            transforms.Resize(image_size),
+            transforms.ToTensor(),
+            transforms.Normalize(
+                mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
+            ),
+        ]
+    )
+    if train_transform is None:
+        train_transform = _default_cgqa_train_transform
+    if eval_transform is None:
+        eval_transform = _default_cgqa_eval_transform
+
     '''load datasets'''
-    datasets, label_info = _get_pin_datasets(dataset_root, mode=mode)
+    datasets, label_info = _get_pin_datasets(dataset_root, mode=mode, image_size=image_size)
     dataset = datasets['dataset']
     label_set, map_tuple_label_to_int, map_int_label_to_tuple = label_info
 
@@ -371,7 +387,7 @@ def fewshot_testing_benchmark(
     benchmark_instance.class_mappings = np.array(class_mappings)
     benchmark_instance.n_classes = num_classes
     benchmark_instance.label_info = label_info
-    benchmark_instance.x_dim = (3, *_image_size)    # (3, 98, 98)
+    benchmark_instance.x_dim = (3, *image_size)    # (3, 98, 98)
     benchmark_instance.n_experiences = n_experiences
 
     return benchmark_instance
@@ -379,6 +395,7 @@ def fewshot_testing_benchmark(
 
 def _get_pin_datasets(
         dataset_root,
+        image_size=(128, 128),
         shuffle=False, seed: Optional[int] = None,
         mode='continual',
         num_samples_each_label=None,
@@ -392,6 +409,7 @@ def _get_pin_datasets(
     You may need to specify label_offset if relative label do not start from 0.
 
     :param dataset_root: Path to the dataset root folder.
+    :param image_size: size of image.
     :param shuffle: If true, the train sample order (in json)
         in the incremental experiences is
         randomly shuffled. Default to False.
@@ -500,15 +518,15 @@ def _get_pin_datasets(
         train_set = PathsDataset(
             root=img_folder_path,
             files=train_list,
-            transform=transforms.Resize(_image_size))
+            transform=transforms.Compose([transforms.Resize(image_size)]))
         val_set = PathsDataset(
             root=img_folder_path,
             files=val_list,
-            transform=transforms.Resize(_image_size))
+            transform=transforms.Compose([transforms.Resize(image_size)]))
         test_set = PathsDataset(
             root=img_folder_path,
             files=test_list,
-            transform=transforms.Resize(_image_size))
+            transform=transforms.Compose([transforms.Resize(image_size)]))
 
         datasets = {'train': train_set, 'val': val_set, 'test': test_set}
         label_info = (label_set, map_tuple_label_to_int, map_int_label_to_tuple)
@@ -527,7 +545,7 @@ def _get_pin_datasets(
         dataset = PathsDataset(
             root=img_folder_path,
             files=img_list,
-            transform=transforms.Resize(_image_size))
+            transform=transforms.Compose([transforms.Resize(image_size)]))
 
         datasets = {'dataset': dataset}
         label_info = (label_set, map_tuple_label_to_int, map_int_label_to_tuple)
@@ -538,27 +556,156 @@ def _get_pin_datasets(
     return datasets, label_info
 
 
+def default_image_loader(path):
+    """
+    Sets the default image loader for the Pytorch Dataset.
+
+    :param path: relative or absolute path of the file to load.
+
+    :returns: Returns the image as a RGB PIL image.
+    """
+    return Image.open(path).convert("RGB")
+
+
+class PathsDataset(torch.utils.data.Dataset):
+    """
+    This class extends the basic Pytorch Dataset class to handle list of paths
+    as the main data source.
+    """
+
+    def __init__(
+        self,
+        root,
+        files,
+        transform=None,
+        target_transform=None,
+        loader=default_image_loader,
+    ):
+        """
+        Creates a File Dataset from a list of files and labels.
+
+        :param root: root path where the data to load are stored. May be None.
+        :param files: list of tuples. Each tuple must contain two elements: the
+            full path to the pattern and its class label. Optionally, the tuple
+            may contain a third element describing the bounding box to use for
+            cropping (top, left, height, width).
+        :param transform: eventual transformation to add to the input data (x)
+        :param target_transform: eventual transformation to add to the targets
+            (y)
+        :param loader: loader function to use (for the real data) given path.
+        """
+
+        if root is not None:
+            root = Path(root)
+
+        self.root: Optional[Path] = root
+        self.imgs = files
+        self.targets = [img_data[1] for img_data in self.imgs]
+        self.transform = transform
+        self.target_transform = target_transform
+        self.loader = loader
+
+    def __getitem__(self, index):
+        """
+        Returns next element in the dataset given the current index.
+
+        :param index: index of the data to get.
+        :return: loaded item.
+        """
+
+        img_description = self.imgs[index]
+        impath = img_description[0]
+        target = img_description[1]
+        bbox = None
+        if len(img_description) > 2:
+            bbox = img_description[2]
+
+        if self.root is not None:
+            impath = self.root / impath
+        img = self.loader(impath)
+
+        # If a bounding box is provided, crop the image before passing it to
+        # any user-defined transformation.
+        if bbox is not None:
+            if isinstance(bbox, Tensor):
+                bbox = bbox.tolist()
+            img = crop(img, *bbox)
+
+        if self.transform is not None:
+            img = self.transform(img)
+        if self.target_transform is not None:
+            target = self.target_transform(target)
+
+        return img, target
+
+    def __len__(self):
+        """
+        Returns the total number of elements in the dataset.
+
+        :return: Total number of dataset items.
+        """
+
+        return len(self.imgs)
+
+
+class Subset(torch.utils.data.Dataset):
+    """
+    subset with class mapping
+    """
+    def __init__(self, dataset, indices, class_mapping, task_labels, transform=None):
+        self._dataset = dataset
+        self._indices = indices
+        self._subset = torch.utils.data.Subset(dataset, indices)
+        self._class_mapping = class_mapping
+        self._task_labels = task_labels
+        self._transform = transform
+
+    def __getitem__(self, index):
+        x, y = self._subset[index]
+        if self._transform is not None:
+            x = self._transform(x)
+        mapped_y = self._class_mapping[y]
+        return x, mapped_y
+
+    def __len__(self):
+        return len(self._indices)
+
+    def get_task_label(self, index):
+        if type(self._task_labels) is int:
+            return self._task_labels
+        return self._task_labels[index]
+
+
+class Benchmark:
+    """
+    Benchmark of all experiments
+    """
+    def __init__(self, train_datasets, test_datasets, val_datasets):
+        self.train_datasets = train_datasets
+        self.test_datasets = test_datasets
+        self.val_datasts = val_datasets
+
+
 __all__ = ["continual_training_benchmark", "fewshot_testing_benchmark"]
 
 
 if __name__ == "__main__":
-    import torch
     '''Continual'''
     # _dataset, _label_info = _get_pin_datasets('../../datasets', mode='continual')
+    # s = set(np.concatenate([list(item) for item in _label_info[0]]))
 
-    _benchmark_instance = continual_training_benchmark(
-        n_experiences=10, return_task_id=True,
-        seed=1234, shuffle=True,
-        dataset_root='../../datasets',
-        # memory_size=1000,
-    )
-    loader = torch.utils.data.DataLoader(_benchmark_instance.train_datasets[0], batch_size=1000, shuffle=True, pin_memory=True)
-    for bi, batch in enumerate(loader):
-        print(bi)
+    # _benchmark_instance = continual_training_benchmark(
+    #     n_experiences=10, return_task_id=True,
+    #     seed=1234, shuffle=True,
+    #     dataset_root='../../datasets',
+    #     # memory_size=1000,
+    # )
     # fixed_class_order:
 
     '''Sys'''
-    # _dataset, _label_info = _get_gqa_datasets('../../datasets', mode='sys')
+    _dataset, _label_info = _get_pin_datasets('../../datasets', mode='noc')
+    s = set(np.concatenate([list(item) for item in _label_info[0]]))
+
     # _benchmark_instance = fewshot_testing_benchmark(
     #     n_experiences=5, n_way=10, n_shot=10, n_query=10, mode='noc',
     #     task_offset=10,

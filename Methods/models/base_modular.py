@@ -176,6 +176,14 @@ class conv_block_base(nn.Module):
 
         #for HAT        
         n_tasks: Optional[int] = None #number of tasks in the sequence
+
+        patch_size: int = 16  # only for vit_block
+        heads: int = 16  # only for vit_block
+        mlp_dim: int = 512  # only for vit_block
+        vit_dropout: float = 0.1  # only for vit_block
+        emb_dropout: float = 0.1  # only for vit_block
+        dim_head: int = 64  # only for vit_block
+
     def __init__(self, in_channels, out_channels, i_size, name=None, module_type='conv', n_layers=1, stride=1, bias=True, deeper=False,
                             options:Options=Options(), n_classes=None,
                             **kwargs):
@@ -244,7 +252,14 @@ class conv_block_base(nn.Module):
                                         norm_layer=norm_layer))
 
                 return nn.Sequential(*layers)
-            self.module = _make_layer(in_channels, planes=out_channels, blocks=int(n_layers/2), stride=stride)        
+            self.module = _make_layer(in_channels, planes=out_channels, blocks=int(n_layers/2), stride=stride)
+
+        # ViT block
+        elif module_type == 'vit_block':
+            from .vit import T_block
+            # out_channels is hidden_size
+            self.module = T_block(dim=out_channels, heads=self.args.heads, dim_head=self.args.dim_head, mlp_dim=self.args.mlp_dim, dropout=self.args.vit_dropout)
+            out_h = 1
 
         elif module_type == 'expert': 
             self.module = Expert(depth=4, i_size=self.i_size, channels=self.in_channels, hidden_size=self.out_channels, num_classes=n_classes, module_options=self.args)
