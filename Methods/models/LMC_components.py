@@ -179,12 +179,16 @@ class Decoder(nn.Module):
             else:
                 kernel_size2=kernel_size  
             stride=2
+            # layer 2: 128->64, same
             if module_type =='linear' or module_type == 'vit_block' or (
-                    module_type == 'resnet_block' and out_channels == 64):        # layer 1 of resnet, 64->64; other layers 128->64, 256->128, 512->256
+                    module_type == 'resnet_block' and out_channels == 64):        # layer 1 of resnet, 64->64;
                 padding=0
                 stride=1    
                 kernel_size=2
-                kernel_size2=1 
+                kernel_size2=1
+            elif module_type == 'resnet_block' and out_channels in [256, 512]:
+                padding=1       # layers 3, 4 256->128, 512->256
+
             assert n_heads>0
 
             print(f'padding: {padding}')
@@ -596,9 +600,9 @@ class LMC_conv_block(conv_block_base):
     def forward(self, x, info='', log_at_this_iter=False):
 
         x_m = self.module(x)  # <-modules functional output
-        print(f'x: {x.shape}')
-        print(f'x_m: {x_m.shape}')
-        print(f'in_dim_inv: {self.in_dim_inv}')
+        # print(f'x: {x.shape}')
+        # print(f'x_m: {x_m.shape}')
+        # print(f'in_dim_inv: {self.in_dim_inv}')
 
         if self.module_type=='expert':
               x_m, _ = x_m
