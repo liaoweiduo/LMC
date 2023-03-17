@@ -8,5 +8,5 @@
     "GPUName": "V100",
     "is_elasticity": true,
     "mount_ceph_business_flag": "DrugAI_CQ",
-    "image_full_name": "mirrors.tencent.com/yunqiao_cv/liaoweiduo:lmc1"
+    "image_full_name": "mirrors.tencent.com/yunqiao_cv/liaoweiduo:lmc2"
 }

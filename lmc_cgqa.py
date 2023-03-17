@@ -51,7 +51,7 @@ class ArgsGenerator():
     regime: str = choice('multitask','cl', default='cl') # multitask regime = ofline trainiogn on all tasks (use single head for it, i.e. multihead=none)
     module_init: str = choice('none','mean','previously_active', 'most_likely', default='previously_active') # new module innitialization strategy
     mask_str_loss: int = 1 # if 'True', the structural components of active modules are weighted as well
-    structure_inv: str = choice('linear_no_act', 'pool_only_large_lin_no_act', 'linear_act', 'ae', default='linear_no_act')
+    structure_inv: str = choice('linear_no_act', 'pool_only_large_lin_no_act', 'linear_act', 'ae', 'conv_no_act', default='linear_no_act')
     use_backup_system: int = 0 #whether to use backup system for modules (only used for continual-meta experiments)
     use_backup_system_structural: int = 0 #whether to use backup system for the structural component (only used for continual-meta experiments)
     running_stats_steps: int = 1000 #size of the running mean and variance interval for the modules

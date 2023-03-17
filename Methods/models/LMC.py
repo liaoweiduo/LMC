@@ -171,6 +171,17 @@ class LMC_net(ModularBaseNet):
 
     def init_modules(self):
         self.encoder = None
+        if self.args.module_type=='resnet_block':
+            self.initial_pool = False
+            assert self.hidden_size == 64
+            inplanes = self.inplanes = 64
+            self.encoder = nn.Sequential(
+                nn.Conv2d(self.channels, self.inplanes, kernel_size=5, stride=2, padding=1, bias=False),    # conv1
+                nn.BatchNorm2d(self.inplanes),  # bn1
+                nn.ReLU(inplace=True),  # relu
+                # nn.MaxPool2d(kernel_size=3, stride=2, padding=1),   # maxpool
+            )
+
 
         if self.args.module_type=='vit_block':
             from einops.layers.torch import Rearrange
@@ -213,6 +224,7 @@ class LMC_net(ModularBaseNet):
         deeper=0
         self.str_priors=nn.ModuleList()
         hidden_size=self.hidden_size
+
         for i in range(self.depth):
             components_l = ComponentList()
             dropout_before=self.module_options.dropout
@@ -220,12 +232,26 @@ class LMC_net(ModularBaseNet):
                 if self.args.depper_first_layer and i==0:
                     deeper=1
                 else:
-                    deeper=0  
-                module_type=self.args.module_type
+                    deeper=0
+
+                stride = 1
+                if self.args.module_type == 'resnet_block':
+                    module_type = 'resnet_block'
+                    hidden_size = [64, 128, 256, 512][i]
+                    channels_in = [64, 64, 128, 256][i]
+                    stride = [1, 2, 2, 2][i]
+                    assert (self.i_size == 128
+                            ), f"img size should be 128 for the corresponding out_h after each layer, current it is {self.i_size}. manually change the out_h"
+                    if i == 0:
+                        out_h = 63
+                else:
+                    module_type = self.args.module_type
+
+
                 self.block_constructor=LMC_conv_block               
 
                 conv = self.block_constructor(out_h, channels_in, hidden_size, out_h, name=f'components.{i}.{m_i}', module_type=module_type, initial_inv_block_lr=self.lr_structural, 
-                                                            deviation_threshold=self.deviation_threshold, freeze_module_after_step_limit=self.args.freeze_module_after_step_limit, deeper=deeper,
+                                                            deviation_threshold=self.deviation_threshold, freeze_module_after_step_limit=self.args.freeze_module_after_step_limit, deeper=deeper, stride=stride,
                                                                                                 options=self.module_options, num_classes=self.num_classes if (self.args.multihead=='modulewise' and i==self.depth-1) else 0)
                 self.module_options.dropout=dropout_before
                 
@@ -243,6 +269,7 @@ class LMC_net(ModularBaseNet):
 
             self.components.append(components_l)
 
+        self.hidden_size = hidden_size      # 512
         self.channels_in = channels_in        
         if self.args.module_type=='resnet_block':
             self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
@@ -627,8 +654,10 @@ class LMC_net(ModularBaseNet):
         #start = time.time() 
         if env_assignments is not None:
             raise NotImplementedError
+        # print(f'X: {X.shape}')
         if self.encoder is not None:      
-            X = self.encoder(X) 
+            X = self.encoder(X)
+        # print(f'X after encoder: {X.shape}')
         if self.args.module_type=='linear':
                 X=X.view(X.size(0), -1)
 

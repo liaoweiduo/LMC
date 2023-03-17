@@ -82,6 +82,18 @@ class MNTDP_net(ModularBaseNet):
         return int(self._n_modules[at_layer].item())
 
     def init_modules(self, structure:List=None):
+        self.encoder = None
+        if self.args.module_type=='resnet_block':
+            self.initial_pool = False
+            assert self.hidden_size == 64
+            inplanes = self.inplanes = 64
+            self.encoder = nn.Sequential(
+                nn.Conv2d(self.channels, self.inplanes, kernel_size=5, stride=2, padding=1, bias=False),    # conv1
+                nn.BatchNorm2d(self.inplanes),  # bn1
+                nn.ReLU(inplace=True),  # relu
+                # nn.MaxPool2d(kernel_size=3, stride=2, padding=1),   # maxpool
+            )
+
 
         channels_in = self.channels
         if self.args.module_type=='linear':
@@ -89,7 +101,7 @@ class MNTDP_net(ModularBaseNet):
 
         out_h=self.i_size  
         deeper=0
-        hidden_size=self.hidden_size
+        hidden_size=self.hidden_size        # 64
 
         if len(self.components)==0:
             for i in range(self.depth):
@@ -98,16 +110,25 @@ class MNTDP_net(ModularBaseNet):
                 #     self.str_priors.append(StructuralPrior(self.n_modules_at_layer(i-1), self.n_modules_at_layer(i)))
                 dropout_before=self.module_options.dropout
                 for m_i in range(self.n_modules_at_layer(i)):
-                    if self.args.depper_first_layer and i==0:
+                    if self.args.depper_first_layer and i==0:       # true for resnet
                         deeper=1
                     else:
-                        deeper=0  
+                        deeper=0
+
+                    stride = 1
                     if self.args.module_type=='resnet_block':
-                        if i==0:
-                            module_type='conv'
-                        else:
-                            module_type='resnet_block'
-                            # self.hidden_size*=2
+                        # if i==0:        # why: the first conv2 layer
+                        #     module_type='conv'
+                        # else:
+                        #     module_type='resnet_block'
+                        module_type='resnet_block'
+                        hidden_size = [64, 128, 256, 512][i]
+                        channels_in = [64, 64, 128, 256][i]
+                        stride = [1, 2, 2, 2][i]
+                        assert (self.i_size == 128
+                                ), f"img size should be 128 for the corresponding out_h after each layer, current it is {self.i_size}. manually change the out_h"
+                        if i == 0:
+                            out_h = 63
                     else:
                         module_type=self.args.module_type   
 
@@ -125,7 +146,7 @@ class MNTDP_net(ModularBaseNet):
                             channels_in = out_h*out_h*channels_in
                             out_h=1
                     self.block_constructor=conv_block_base         
-                    conv = self.block_constructor(channels_in, hidden_size, out_h, name=f'components.{i}.{m_i}', module_type=module_type, deeper=deeper, options=self.module_options)
+                    conv = self.block_constructor(channels_in, hidden_size, out_h, name=f'components.{i}.{m_i}', module_type=module_type, stride=stride, deeper=deeper, options=self.module_options)
                     self.module_options.dropout=dropout_before                
                     ##################################################
                     ###Initialize all modules in layers identically###   
@@ -286,12 +307,24 @@ class MNTDP_net(ModularBaseNet):
                     strucure = self.structure_pool[task_id]
             assert strucure is None or len(strucure)==self.depth
 
+            if self.encoder is not None:
+                X = self.encoder(X)
+
             if self.args.module_type=='linear':
                     X=X.view(X.size(0), -1)
             n = X.shape[0]
             c = X.shape[1]          
             for layer, comp_idx in zip(self.components,strucure):
                     X = layer[comp_idx](X)
+
+            if self.args.module_type != 'vit_block':
+                X = self.avgpool(X)
+            else:
+                x = X.mean(dim=1) if self.pool == 'mean' else X[:, 0]
+
+                x = self.to_latent(x)
+                X = self.mlp_head(x)
+
             X_flattened = X.reshape(n, -1)   
             if self.args.multihead=='none':
                 raise NotImplementedError
@@ -311,12 +344,24 @@ class MNTDP_net(ModularBaseNet):
                     strucure = self.structure_pool[task_id]  
                     assert strucure is None or len(strucure)==self.depth
 
+                    if self.encoder is not None:
+                        X = self.encoder(X)
+
                     if self.args.module_type=='linear':
                             X=X.view(X.size(0), -1)
                     n = X.shape[0]
                     c = X.shape[1]          
                     for layer, comp_idx in zip(self.components,strucure):
                             X = layer[comp_idx](X)
+
+                    if self.args.module_type != 'vit_block':
+                        X = self.avgpool(X)
+                    else:
+                        x = X.mean(dim=1) if self.pool == 'mean' else X[:, 0]
+
+                        x = self.to_latent(x)
+                        X = self.mlp_head(x)
+
                     X_flattened = X.reshape(n, -1)   
                     if self.args.multihead=='none':
                         raise NotImplementedError
@@ -340,12 +385,24 @@ class MNTDP_net(ModularBaseNet):
                     strucure = self.structure_pool[task_id]   
                     assert strucure is None or len(strucure)==self.depth
 
+                    if self.encoder is not None:
+                        X = self.encoder(X)
+
                     if self.args.module_type=='linear':
                             X=X.view(X.size(0), -1)
                     n = X.shape[0]
                     c = X.shape[1]          
                     for layer, comp_idx in zip(self.components,strucure):
                             X = layer[comp_idx](X)
+
+                    if self.args.module_type != 'vit_block':
+                        X = self.avgpool(X)
+                    else:
+                        x = X.mean(dim=1) if self.pool == 'mean' else X[:, 0]
+
+                        x = self.to_latent(x)
+                        X = self.mlp_head(x)
+
                     X_flattened = X.reshape(n, -1)   
                     if self.args.multihead=='none':
                         raise NotImplementedError
@@ -360,10 +417,10 @@ class MNTDP_net(ModularBaseNet):
                 return self.forward_template(logit=logits_best, info={'embeddings':X})#, 'selected_decoder':oh_selected})
 
     def reinit_output_head(self, num_classes=None):
-        self.args.multihead = 'none'
+        self.args.multihead = 'usual'
         num_classes = self.num_classes if num_classes is None else num_classes
 
-        self.decoder = nn.Linear(self.representation_dim, num_classes).to(device)
+        self.decoder = nn.ModuleList([nn.Linear(self.representation_dim, num_classes).to(device)])
 
         if self.args.regime=='normal':
             self.optimizer, self.optimizer_structure = self.get_optimizers()
@@ -399,30 +456,32 @@ class MNTDP_net(ModularBaseNet):
                                 c.load_state_dict(classifier_dict, strict=False)
         return super().load_state_dict(state_dict,strict)
 
-    def create_search_space(self, best_structure:List):
+    def create_search_space(self, best_structure:List, new=True):
         if self.args.searchspace=='topdown':
             #1. most likeliy structure sofar                               
             best_structure = [0 for _ in range(self.depth)] if best_structure is None else best_structure
             best_model = self.init_modules(best_structure)
             yield best_model, best_structure #[0 for _ in range(self.depth)]
-            new_structure=copy.copy(best_structure) #[0 for _ in range(self.depth)]
-            for i in range(self.depth):
-                l = self.depth-1-i
-                if self.components[l][-1].module_learned:
-                    new_structure[l]=len(self.components[l])  
-                    model = self.init_modules(structure=new_structure)
-                    yield model, new_structure
+            if new:
+                new_structure=copy.copy(best_structure) #[0 for _ in range(self.depth)]
+                for i in range(self.depth):
+                    l = self.depth-1-i
+                    if self.components[l][-1].module_learned:
+                        new_structure[l]=len(self.components[l])
+                        model = self.init_modules(structure=new_structure)
+                        yield model, new_structure
         elif self.args.searchspace=='bottomup':
             #1. most likeliy structure sofar                                   
             best_structure = [0 for _ in range(self.depth)] if best_structure is None else best_structure
             best_model = self.init_modules(best_structure)
             yield best_model, best_structure #[0 for _ in range(self.depth)]
-            new_structure=copy.copy(best_structure) #[0 for _ in range(self.depth)]
-            for i in range(self.depth):
-                l = i
-                if self.components[l][-1].module_learned:
-                    new_structure[l]=len(self.components[l])  
-                    model = self.init_modules(structure=new_structure)
-                    yield model, new_structure
+            if new:
+                new_structure=copy.copy(best_structure) #[0 for _ in range(self.depth)]
+                for i in range(self.depth):
+                    l = i
+                    if self.components[l][-1].module_learned:
+                        new_structure[l]=len(self.components[l])
+                        model = self.init_modules(structure=new_structure)
+                        yield model, new_structure
         else:
             raise NotImplemented

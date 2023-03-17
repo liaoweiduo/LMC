@@ -179,12 +179,19 @@ class Decoder(nn.Module):
             else:
                 kernel_size2=kernel_size  
             stride=2
-            if module_type =='linear' or module_type == 'resnet_block' or module_type == 'vit_block':
+            if module_type =='linear' or module_type == 'vit_block' or (
+                    module_type == 'resnet_block' and out_channels == 64):        # layer 1 of resnet, 64->64; other layers 128->64, 256->128, 512->256
                 padding=0
                 stride=1    
                 kernel_size=2
                 kernel_size2=1 
             assert n_heads>0
+
+            print(f'padding: {padding}')
+            print(f'stride: {stride}')
+            print(f'kernel_size: {kernel_size-1}')
+            print(f'kernel_size2: {kernel_size2}')
+
             if n_heads==1:
                 self.decoder=nn.Sequential(OrderedDict([
                             ('conv_t1', nn.ConvTranspose2d(out_channels, out_channels, kernel_size=kernel_size-1, padding=padding, stride=stride)),  
@@ -379,8 +386,8 @@ class LMC_conv_block(conv_block_base):
 
         n_heads_decoder: int = 1 # number of structural components (if >1 the average structural score is calculated)
 
-    def __init__(self, in_h, in_channels, out_channels, i_size, name=None, module_type='conv', initial_inv_block_lr=0.001,  deviation_threshold=3, freeze_module_after_step_limit=False, deeper=False, options:Options=Options(), num_classes: int=0, **kwargs):
-        super().__init__(in_channels, out_channels,i_size, name, module_type, 1, 1, bias=True, deeper=deeper, options=options, n_classes=num_classes, **kwargs)                  
+    def __init__(self, in_h, in_channels, out_channels, i_size, name=None, module_type='conv', stride=1, initial_inv_block_lr=0.001,  deviation_threshold=3, freeze_module_after_step_limit=False, deeper=False, options:Options=Options(), num_classes: int=0, **kwargs):
+        super().__init__(in_channels, out_channels,i_size, name, module_type, 1, stride, bias=True, deeper=deeper, options=options, n_classes=num_classes, **kwargs)
         
         self.in_h=in_h
         self.num_classes=num_classes
@@ -588,7 +595,10 @@ class LMC_conv_block(conv_block_base):
 
     def forward(self, x, info='', log_at_this_iter=False):
 
-        x_m = self.module(x)  # <-modules functional output     
+        x_m = self.module(x)  # <-modules functional output
+        print(f'x: {x.shape}')
+        print(f'x_m: {x_m.shape}')
+        print(f'in_dim_inv: {self.in_dim_inv}')
 
         if self.module_type=='expert':
               x_m, _ = x_m

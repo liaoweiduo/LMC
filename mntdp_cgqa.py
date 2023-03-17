@@ -532,7 +532,8 @@ def main(args:ArgsGenerator):
     '''reinit model decoder'''
     model_main.reinit_output_head(n_classes)        # ensure all test are 10 way. only 1 decoder
     '''backup model'''
-    state_dict_learned = copy.deepcopy(model_main.state_dict())
+    model_main_learned = copy.deepcopy(model_main)      # contain structure_pool
+
 
     '''test on different mode'''
     for mode_id, mode in enumerate(['sys', 'pro', 'sub', 'non', 'noc']):    # 10, 11, 12, 13, 14
@@ -553,7 +554,7 @@ def main(args:ArgsGenerator):
             train_loader_current, valid_dataloader, test_loader_current = create_dataloader_cgqa(
                 fewshot_test_benchmark, i, args, batch_size=args.batch_size)
 
-            model_main.load_state_dict(state_dict_learned, strict=True)
+            model_main = copy.deepcopy(model_main_learned)
 
             '''train'''
             ####################################
@@ -574,7 +575,7 @@ def main(args:ArgsGenerator):
             #                            model_main.structure_pool[0])
 
             # 1b. Create the search space
-            search_space = model_main.create_search_space(best_structure_knn)
+            search_space = model_main.create_search_space(best_structure_knn, new=False)
             ##########################################
 
             # 2. Search for the bast model on the given task
@@ -582,9 +583,9 @@ def main(args:ArgsGenerator):
             for _m, (model, structure) in enumerate(search_space):
                 model.optimizer, _ = model.get_optimizers()
                 model = train_on_task(model, args, train_loader_current, valid_dataloader, test_loader_current,
-                                      epochs=args.epochs, task_id=i, epochs_str_only=0)
+                                      epochs=args.epochs, task_id=-1, epochs_str_only=0)
                 # model_p=copy.deepcopy(model)
-                valid_acc = test(model, None, valid_dataloader, None, task_id=i)[0].cpu().item()
+                valid_acc = test(model, None, valid_dataloader, None, task_id=-1)[0].cpu().item()
                 if best_valid_acc is None or best_valid_acc < valid_acc:
                     best_valid_acc = copy.deepcopy(valid_acc)
                     best_model = copy.deepcopy(model)
@@ -593,7 +594,7 @@ def main(args:ArgsGenerator):
 
             ##########################################
             test_acc = \
-            test(best_model, None, test_loader_current, None, task_id=i if not args.task_agnostic_test else None)[
+            test(best_model, None, test_loader_current, None, task_id=-1 if not args.task_agnostic_test else None)[
                 0].cpu().item()
             test_accuracies.append(test_acc)
             valid_accuracies.append(best_valid_acc)
