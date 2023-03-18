@@ -82,19 +82,6 @@ class MNTDP_net(ModularBaseNet):
         return int(self._n_modules[at_layer].item())
 
     def init_modules(self, structure:List=None):
-        self.encoder = None
-        if self.args.module_type=='resnet_block':
-            self.initial_pool = False
-            assert self.hidden_size == 64
-            inplanes = self.inplanes = 64
-            self.encoder = nn.Sequential(
-                nn.Conv2d(self.channels, self.inplanes, kernel_size=5, stride=2, padding=1, bias=False),    # conv1
-                nn.BatchNorm2d(self.inplanes),  # bn1
-                nn.ReLU(inplace=True),  # relu
-                # nn.MaxPool2d(kernel_size=3, stride=2, padding=1),   # maxpool
-            )
-
-
         channels_in = self.channels
         if self.args.module_type=='linear':
             channels_in = self.i_size * self.i_size * self.channels  
@@ -104,6 +91,18 @@ class MNTDP_net(ModularBaseNet):
         hidden_size=self.hidden_size        # 64
 
         if len(self.components)==0:
+            self.encoder = None
+            if self.args.module_type == 'resnet_block':
+                self.initial_pool = False
+                assert self.hidden_size == 64
+                inplanes = self.inplanes = 64
+                self.encoder = nn.Sequential(
+                    nn.Conv2d(self.channels, self.inplanes, kernel_size=5, stride=2, padding=1, bias=False),  # conv1
+                    nn.BatchNorm2d(self.inplanes),  # bn1
+                    nn.ReLU(inplace=True),  # relu
+                    # nn.MaxPool2d(kernel_size=3, stride=2, padding=1),   # maxpool
+                )
+
             for i in range(self.depth):
                 components_l = ComponentList()
                 # if i>0:
