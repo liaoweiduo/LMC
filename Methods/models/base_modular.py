@@ -196,6 +196,7 @@ class conv_block_base(nn.Module):
         self.dropout = nn.Dropout(self.args.dropout)
         self.i_size=i_size
         self.deeper=deeper
+        self.stride=stride
         self.module_type=module_type
         self.depth=1
         

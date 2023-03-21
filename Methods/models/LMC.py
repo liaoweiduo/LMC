@@ -250,7 +250,7 @@ class LMC_net(ModularBaseNet):
 
                 self.block_constructor=LMC_conv_block
 
-                print(f'LMC: add module, in_h: {out_h}, channels_in: {channels_in}, channels: {hidden_size}, i_size: {out_h}, module_type: {module_type}. ')
+                print(f'LMC: in_h: {out_h}, channels_in: {channels_in}, channels: {hidden_size}, i_size: {out_h}, module_type: {module_type}, self.module_options.kernel_size: {self.module_options.kernel_size}. ')
                 conv = self.block_constructor(out_h, channels_in, hidden_size, out_h, name=f'components.{i}.{m_i}', module_type=module_type, initial_inv_block_lr=self.lr_structural, 
                                                             deviation_threshold=self.deviation_threshold, freeze_module_after_step_limit=self.args.freeze_module_after_step_limit, deeper=deeper, stride=stride,
                                                                                                 options=self.module_options, num_classes=self.num_classes if (self.args.multihead=='modulewise' and i==self.depth-1) else 0)
@@ -423,6 +423,7 @@ class LMC_net(ModularBaseNet):
                 channels = layer[0].out_channels
                 i_size = layer[0].i_size
                 deeper = layer[0].deeper
+                stride = layer[0].stride
                 module_type = layer[0].module_type         
                 self.module_options.kernel_size=layer[0].args.kernel_size
                 self.module_options.dropout=layer[0].args.dropout
@@ -468,11 +469,12 @@ class LMC_net(ModularBaseNet):
                     if not c.args.anneal_structural_lr:
                         c.on_module_addition_at_my_layer(inner_loop_free=(self.args.regime=='meta'))
 
-                print(f'LMC: add module, in_h: {in_h}, channels_in: {channels_in}, channels: {channels}, i_size: {i_size}, module_type: {module_type}. ')
+                print(f'LMC: add module, in_h: {in_h}, channels_in: {channels_in}, channels: {channels}, i_size: {i_size}, module_type: {module_type}, self.module_options.kernel_size: {self.module_options.kernel_size}. ')
                 new_module = block_constructor(in_h, channels_in, channels, i_size, initial_inv_block_lr=self.lr_structural, 
                                                             name=f'components.{l}.{len(layer)}', 
-                                                            module_type=module_type, deviation_threshold=self.deviation_threshold, freeze_module_after_step_limit=self.args.freeze_module_after_step_limit, deeper=deeper, options=self.module_options,
+                                                            module_type=module_type, deviation_threshold=self.deviation_threshold, freeze_module_after_step_limit=self.args.freeze_module_after_step_limit, deeper=deeper, stride=stride, options=self.module_options,
                                                             num_classes=self.num_classes if (self.args.multihead=='modulewise' and l==self.depth-1) else 0 )
+                # print(f'new_module: {new_module}')
                 if init_params is not None:  
                     if verbose:
                         print('loading state dict new module')     
