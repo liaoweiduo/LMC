@@ -261,7 +261,7 @@ def get_accs_for_tasks(model:nn.Module, args:ArgsGenerator, loaders:List[DataLoa
         model.load_state_dict(state_dict, strict=True)             
         #dont warm up batch norm on the last task, as it just trained on it anyways   
         # no warm up for the last loader, if no batch norm is used, if gating=='experts'     
-        steps_bn_warmup = 200*max(1-int(ti==(len(loaders)-1)), 1-int(args.copy_batchstats))*int(args.use_bn)*(1-int(args.keep_bn_in_eval_after_freeze))  #*int(args.gating=='locspec')
+        steps_bn_warmup = 200*max(1-int(ti==(len(loaders)-1)), 1-int(args.copy_batchstats))*int(args.use_bn)*(1-int(args.keep_bn_in_eval_after_freeze))  #*int(args.gating=='locspec')      0
         if args.warmup_bn_bf_training:
             steps_bn_warmup=200
         print('steps_bn_warmup', steps_bn_warmup)
@@ -421,6 +421,7 @@ def main(args:ArgsGenerator):
             raise NotImplementedError
         ##########################################
         test_acc = test(model_main, None, test_loader_current, None, task_id=i if not args.task_agnostic_test else None)[0].cpu().item()
+        print(f'test acc (just after the task): {test_acc}')
         test_accuracies_past.append(test_acc)
         valid_accuracies_past.append(best_valid_acc)
         ####################
@@ -467,7 +468,7 @@ def main(args:ArgsGenerator):
         '''save model after train 1 task'''
         model_save(model_main, args, i, os.path.join(exp_path, 'model.pt'))
 
-    if learned_task_id < n_tasks - 1:   # just finish continual train. need to do test
+    if learned_task_id < n_tasks - 1 or args.redo_final_test:   # just finish continual train. need to do test
         if isinstance(model_main.decoder, Iterable):
             for d in model_main.decoder:
                 print(torch.sum(d.weight))
@@ -581,6 +582,7 @@ def main(args:ArgsGenerator):
             # 2. Search for the bast model on the given task
             best_valid_acc, best_model, best_structure, best_idx = None, None, None, None
             for _m, (model, structure) in enumerate(search_space):
+                print(f'choose structure: {structure}.')
                 model.optimizer, _ = model.get_optimizers()
                 model = train_on_task(model, args, train_loader_current, valid_dataloader, test_loader_current,
                                       epochs=args.epochs, task_id=-1, epochs_str_only=0)

@@ -159,6 +159,8 @@ class ArgsGenerator():
     n_heads_decoder: int = 1 #-
     ##############################
 
+    redo_final_test:int = 0
+
 
     def __post_init__(self):
         if self.task_sequence == 's_ood':

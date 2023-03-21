@@ -379,13 +379,17 @@ def mkdir(path):
 
 
 def model_save(model, args, learned_task_id, path):
+    structure_pool = None
     if model is None:
         # load from path and resave
         checkpoint = model_load(path)
         model_state_dict = checkpoint['state_dict']
+        if 'structure_pool' in checkpoint.keys():
+            structure_pool = checkpoint['structure_pool']
     else:
         model_state_dict = model.state_dict()
-
+        if hasattr(model, 'structure_pool'):
+            structure_pool = model.structure_pool
     # path=os.path.join(wandb.run.dir, 'model.pt')
 
     save_dict = {
@@ -393,8 +397,8 @@ def model_save(model, args, learned_task_id, path):
         'args': vars(args),
         'learned_task_id': learned_task_id,
     }
-    if model is not None and hasattr(model, 'structure_pool'):
-        save_dict['structure_pool'] = model.structure_pool
+    if structure_pool is not None:
+        save_dict['structure_pool'] = structure_pool
 
     torch.save(save_dict, path)
 
