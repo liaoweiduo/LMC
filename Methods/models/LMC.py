@@ -248,8 +248,9 @@ class LMC_net(ModularBaseNet):
                     module_type = self.args.module_type
 
 
-                self.block_constructor=LMC_conv_block               
+                self.block_constructor=LMC_conv_block
 
+                print(f'LMC: add module, in_h: {out_h}, channels_in: {channels_in}, channels: {hidden_size}, i_size: {out_h}, module_type: {module_type}. ')
                 conv = self.block_constructor(out_h, channels_in, hidden_size, out_h, name=f'components.{i}.{m_i}', module_type=module_type, initial_inv_block_lr=self.lr_structural, 
                                                             deviation_threshold=self.deviation_threshold, freeze_module_after_step_limit=self.args.freeze_module_after_step_limit, deeper=deeper, stride=stride,
                                                                                                 options=self.module_options, num_classes=self.num_classes if (self.args.multihead=='modulewise' and i==self.depth-1) else 0)
@@ -465,8 +466,9 @@ class LMC_net(ModularBaseNet):
 
                 for c in layer:
                     if not c.args.anneal_structural_lr:
-                        c.on_module_addition_at_my_layer(inner_loop_free=(self.args.regime=='meta'))    
-                  
+                        c.on_module_addition_at_my_layer(inner_loop_free=(self.args.regime=='meta'))
+
+                print(f'LMC: add module, in_h: {in_h}, channels_in: {channels_in}, channels: {channels}, i_size: {i_size}, module_type: {module_type}. ')
                 new_module = block_constructor(in_h, channels_in, channels, i_size, initial_inv_block_lr=self.lr_structural, 
                                                             name=f'components.{l}.{len(layer)}', 
                                                             module_type=module_type, deviation_threshold=self.deviation_threshold, freeze_module_after_step_limit=self.args.freeze_module_after_step_limit, deeper=deeper, options=self.module_options,

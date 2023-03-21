@@ -392,7 +392,7 @@ class LMC_conv_block(conv_block_base):
 
     def __init__(self, in_h, in_channels, out_channels, i_size, name=None, module_type='conv', stride=1, initial_inv_block_lr=0.001,  deviation_threshold=3, freeze_module_after_step_limit=False, deeper=False, options:Options=Options(), num_classes: int=0, **kwargs):
         super().__init__(in_channels, out_channels,i_size, name, module_type, 1, stride, bias=True, deeper=deeper, options=options, n_classes=num_classes, **kwargs)
-        
+        print(f'LMC_components: in_h: {in_h}, in_channels: {in_channels}, out_channels: {out_channels}, i_size: {i_size}. ')
         self.in_h=in_h
         self.num_classes=num_classes
         self.args: LMC_conv_block.Options = copy.copy(options)
