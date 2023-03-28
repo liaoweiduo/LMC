@@ -917,6 +917,8 @@ def main(args:ArgsGenerator):
         '''save results'''
         np.save(os.path.join(exp_path, f'results-{mode}.npy'), np.array(test_accuracies))
 
+        learned_task_id += 1
+
     return None
 
 def plot_confusion(df_cm, wandb_tag=None, save_dir=None, labels=None):
