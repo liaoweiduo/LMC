@@ -181,11 +181,16 @@ class Decoder(nn.Module):
             stride=2
             # layer 2: 128->64, same
             if module_type =='linear' or module_type == 'vit_block' or (
-                    module_type == 'resnet_block' and out_channels == 64):        # layer 1 of resnet, 64->64;
+                    module_type == 'resnet_block' and in_channels == 64 and out_channels == 64):        # layer 1 of resnet, 64->64;
                 padding=0
                 stride=1    
                 kernel_size=2
                 kernel_size2=1
+            elif module_type == 'resnet_block' and in_channels == 3 and out_channels == 64:        # layer 0 of resnet, 3->64
+                padding = 1
+                stride=2
+                kernel_size=4
+                kernel_size2=4
             elif module_type == 'resnet_block' and out_channels in [256, 512]:
                 padding=1       # layers 3, 4 256->128, 512->256
 

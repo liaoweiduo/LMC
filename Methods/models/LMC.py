@@ -174,13 +174,13 @@ class LMC_net(ModularBaseNet):
         if self.args.module_type=='resnet_block':
             self.initial_pool = False
             assert self.hidden_size == 64
-            inplanes = self.inplanes = 64
-            self.encoder = nn.Sequential(
-                nn.Conv2d(self.channels, self.inplanes, kernel_size=5, stride=2, padding=1, bias=False),    # conv1
-                nn.BatchNorm2d(self.inplanes),  # bn1
-                nn.ReLU(inplace=True),  # relu
-                # nn.MaxPool2d(kernel_size=3, stride=2, padding=1),   # maxpool
-            )
+            # inplanes = self.inplanes = 64
+            # self.encoder = nn.Sequential(
+            #     nn.Conv2d(self.channels, self.inplanes, kernel_size=5, stride=2, padding=1, bias=False),    # conv1
+            #     nn.BatchNorm2d(self.inplanes),  # bn1
+            #     nn.ReLU(inplace=True),  # relu
+            #     # nn.MaxPool2d(kernel_size=3, stride=2, padding=1),   # maxpool
+            # )
 
 
         if self.args.module_type=='vit_block':
@@ -195,25 +195,26 @@ class LMC_net(ModularBaseNet):
             patch_dim = self.channels * patch_height * patch_width
             assert self.args.pool in {'cls', 'mean'}, 'pool type must be either cls (cls token) or mean (mean pooling)'
 
-            self.to_patch_embedding = nn.Sequential(
-                Rearrange('b c (h p1) (w p2) -> b (h w) (p1 p2 c)', p1=patch_height, p2=patch_width),
-                # nn.BatchNorm1d(num_patches),
-                nn.LayerNorm(patch_dim),
-                nn.Linear(patch_dim, self.hidden_size),
-                # nn.BatchNorm1d(num_patches),
-                nn.LayerNorm(self.hidden_size),
-            )
-
-            self.pos_embedding = nn.Parameter(torch.randn(1, num_patches + 1, self.hidden_size))
-            self.cls_token = nn.Parameter(torch.randn(1, 1, self.hidden_size))
-            self.dropout = nn.Dropout(self.args.emb_dropout)
-
-            self.pool = self.args.pool
-            self.to_latent = nn.Identity()
-
-            self.mlp_head = nn.Sequential(
-                nn.LayerNorm(self.hidden_size),
-            )
+            # todo: need to be modularized
+            # self.to_patch_embedding = nn.Sequential(
+            #     Rearrange('b c (h p1) (w p2) -> b (h w) (p1 p2 c)', p1=patch_height, p2=patch_width),
+            #     # nn.BatchNorm1d(num_patches),
+            #     nn.LayerNorm(patch_dim),
+            #     nn.Linear(patch_dim, self.hidden_size),
+            #     # nn.BatchNorm1d(num_patches),
+            #     nn.LayerNorm(self.hidden_size),
+            # )
+            #
+            # self.pos_embedding = nn.Parameter(torch.randn(1, num_patches + 1, self.hidden_size))
+            # self.cls_token = nn.Parameter(torch.randn(1, 1, self.hidden_size))
+            # self.dropout = nn.Dropout(self.args.emb_dropout)
+            #
+            # self.pool = self.args.pool
+            # self.to_latent = nn.Identity()
+            #
+            # self.mlp_head = nn.Sequential(
+            #     nn.LayerNorm(self.hidden_size),
+            # )
 
         channels_in = self.channels
 
@@ -237,13 +238,13 @@ class LMC_net(ModularBaseNet):
                 stride = 1
                 if self.args.module_type == 'resnet_block':
                     module_type = 'resnet_block'
-                    hidden_size = [64, 128, 256, 512][i]
-                    channels_in = [64, 64, 128, 256][i]
-                    stride = [1, 2, 2, 2][i]
+                    hidden_size = [64, 64, 128, 256, 512][i]
+                    channels_in = [3, 64, 64, 128, 256][i]
+                    stride = [2, 1, 2, 2, 2][i]     # stride[0] no use
                     assert (self.i_size == 128
                             ), f"img size should be 128 for the corresponding out_h after each layer, current it is {self.i_size}. manually change the out_h"
-                    if i == 0:
-                        out_h = 63
+                    # if i == 0:
+                    #     out_h = 63
                 else:
                     module_type = self.args.module_type
 

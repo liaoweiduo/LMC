@@ -93,7 +93,6 @@ class MNTDP_net(ModularBaseNet):
         if len(self.components)==0:
             self.encoder = None
 
-            # todo: as the first layer: component
             if self.args.module_type == 'resnet_block':
                 self.initial_pool = False
                 assert self.hidden_size == 64
@@ -125,7 +124,7 @@ class MNTDP_net(ModularBaseNet):
                         module_type='resnet_block'
                         hidden_size = [64, 64, 128, 256, 512][i]
                         channels_in = [3, 64, 64, 128, 256][i]
-                        stride = [2, 1, 2, 2, 2][i]
+                        stride = [2, 1, 2, 2, 2][i]     # stride[0] no use
                         assert (self.i_size == 128
                                 ), f"img size should be 128 for the corresponding out_h after each layer, current it is {self.i_size}. manually change the out_h"
                         if i == 0:
