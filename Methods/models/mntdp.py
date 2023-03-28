@@ -92,16 +92,18 @@ class MNTDP_net(ModularBaseNet):
 
         if len(self.components)==0:
             self.encoder = None
+
+            # todo: as the first layer: component
             if self.args.module_type == 'resnet_block':
                 self.initial_pool = False
                 assert self.hidden_size == 64
-                inplanes = self.inplanes = 64
-                self.encoder = nn.Sequential(
-                    nn.Conv2d(self.channels, self.inplanes, kernel_size=5, stride=2, padding=1, bias=False),  # conv1
-                    nn.BatchNorm2d(self.inplanes),  # bn1
-                    nn.ReLU(inplace=True),  # relu
-                    # nn.MaxPool2d(kernel_size=3, stride=2, padding=1),   # maxpool
-                )
+                # inplanes = self.inplanes = 64
+                # self.encoder = nn.Sequential(
+                #     nn.Conv2d(self.channels, self.inplanes, kernel_size=5, stride=2, padding=1, bias=False),  # conv1
+                #     nn.BatchNorm2d(self.inplanes),  # bn1
+                #     nn.ReLU(inplace=True),  # relu
+                #     # nn.MaxPool2d(kernel_size=3, stride=2, padding=1),   # maxpool
+                # )
 
             for i in range(self.depth):
                 components_l = ComponentList()
@@ -109,7 +111,7 @@ class MNTDP_net(ModularBaseNet):
                 #     self.str_priors.append(StructuralPrior(self.n_modules_at_layer(i-1), self.n_modules_at_layer(i)))
                 dropout_before=self.module_options.dropout
                 for m_i in range(self.n_modules_at_layer(i)):
-                    if self.args.depper_first_layer and i==0:       # true for resnet
+                    if self.args.depper_first_layer and i==0:       # no used for resnet
                         deeper=1
                     else:
                         deeper=0
@@ -121,9 +123,9 @@ class MNTDP_net(ModularBaseNet):
                         # else:
                         #     module_type='resnet_block'
                         module_type='resnet_block'
-                        hidden_size = [64, 128, 256, 512][i]
-                        channels_in = [64, 64, 128, 256][i]
-                        stride = [1, 2, 2, 2][i]
+                        hidden_size = [64, 64, 128, 256, 512][i]
+                        channels_in = [3, 64, 64, 128, 256][i]
+                        stride = [2, 1, 2, 2, 2][i]
                         assert (self.i_size == 128
                                 ), f"img size should be 128 for the corresponding out_h after each layer, current it is {self.i_size}. manually change the out_h"
                         if i == 0:
