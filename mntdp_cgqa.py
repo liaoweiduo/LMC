@@ -538,8 +538,8 @@ def main(args:ArgsGenerator):
 
     '''test on different mode'''
     for mode_id, mode in enumerate(['sys', 'pro', 'sub', 'non', 'noc']):    # 10, 11, 12, 13, 14
-        if mode_id + n_tasks <= learned_task_id:                 # pass finished mode
-            pass
+        if mode_id + args.n_tasks <= learned_task_id:                 # pass finished mode
+            continue
 
         fewshot_test_benchmark = get_benchmark(mode, args)
         n_tasks = fewshot_test_benchmark.n_experiences      # 300
@@ -613,12 +613,10 @@ def main(args:ArgsGenerator):
         log_wandb({f'{mode}/95ci_valid_acc': 1.96 * (np.std(valid_accuracies) / np.sqrt(n_tasks))})
 
         '''save model'''
-        model_save(None, args, mode_id + n_tasks, os.path.join(exp_path, 'model.pt'))
+        model_save(None, args, mode_id + args.n_tasks, os.path.join(exp_path, 'model.pt'))
 
         '''save results'''
         np.save(os.path.join(exp_path, f'results-{mode}.npy'), np.array(test_accuracies))
-
-        learned_task_id += 1
 
 
     return None
