@@ -251,6 +251,7 @@ class MNTDP_net(ModularBaseNet):
                 channels = layer[0].out_channels
                 i_size = layer[0].i_size
                 deeper = layer[0].deeper
+                stride = layer[0].stride
                 module_type = layer[0].module_type   
                 self.module_options.kernel_size=layer[0].args.kernel_size
                 self.module_options.dropout=layer[0].args.dropout
@@ -258,7 +259,8 @@ class MNTDP_net(ModularBaseNet):
                 ################################################
                 new_module = block_constructor(channels_in, channels, i_size,   
                                                 name=f'components.{l}.{len(layer)}', 
-                                                module_type=module_type, deeper=deeper, options=self.module_options)
+                                                module_type=module_type, stride=stride, deeper=deeper, options=self.module_options)
+
                 if state_dict is not None:
                     new_module.load_state_dict(state_dict)
                 new_module.reset()
@@ -456,8 +458,13 @@ class MNTDP_net(ModularBaseNet):
                                 c.load_state_dict(classifier_dict, strict=False)
         return super().load_state_dict(state_dict,strict)
 
-    def create_search_space(self, best_structure:List, new=True):
-        if self.args.searchspace=='topdown':
+    def create_search_space(self, best_structure:List, new=True, debug=0):
+        if debug:
+            new_structure = [0,0,0,0,1]
+            model = self.init_modules(structure=new_structure)
+            yield model, new_structure
+
+        elif self.args.searchspace=='topdown':
             #1. most likeliy structure sofar                               
             best_structure = [0 for _ in range(self.depth)] if best_structure is None else best_structure
             best_model = self.init_modules(best_structure)

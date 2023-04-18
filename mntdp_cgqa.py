@@ -202,10 +202,15 @@ def train_on_task(model:nn.Module, args:ArgsGenerator, train_loader, valid_loade
                     model.eval()  
                     acc_valid, _, _ = test(model, classes, valid_loader, temp=temp_e, task_id=task_id) 
                     log_wandb({f'task_{task_id}/valid_acc':acc_valid})
+                    # print(f'debug: task_{task_id}/valid_acc: {acc_valid}')
                     if best_val < acc_valid:
-                        epochs_overfitting = 0
+                        epochs_overfitting = e
                         best_val = acc_valid
                         best_model = copy.deepcopy(model.state_dict())
+                    '''Modify: add early stop'''
+                    if epochs_overfitting <= e - 10:     # patience for 10epochs
+                        print(f'early stop at epoch: {e}')
+                        break
                 
         #############################################
 
@@ -218,9 +223,13 @@ def train_on_task(model:nn.Module, args:ArgsGenerator, train_loader, valid_loade
             # log_wandb(dict(filter(lambda v: ('_buffer' in v[0]), model.state_dict().items())), prefix='module_stats/')  
             print('test acc: ', acc_test, ' epoch ', e)
             log_wandb({f'task_{task_id}/test_acc':acc_test})
+
+        # break  # for debug, only train 1 epoch
+
         e+=1  
     current_epoch = e
-    if best_model is not None:          
+    if best_model is not None:
+        # print(f'debug: load best model, which has best_val: {best_val}')
         if args.use_backup_system and args.gating=='locspec':
             output_heads = [head.out_features for head in model.decoder]
             model = init_model(args, args.gating, n_classes=output_heads[0], multihead='usual', i_size=model.i_size) 
@@ -383,7 +392,7 @@ def main(args:ArgsGenerator):
         if args.warmup_bn_bf_training and i>0:
             model_main=bn_warmup(model_main,i,train_loader_current,200,force_structure=True,strucure=best_structure_knn if best_structure_knn is not None else model_main.structure_pool[0])
         #1b. Create the search space
-        search_space = model_main.create_search_space(best_structure_knn)
+        search_space = model_main.create_search_space(best_structure_knn, debug=0)
         ##########################################
 
         #2. Search for the bast model on the given task
@@ -393,6 +402,7 @@ def main(args:ArgsGenerator):
             model=train_on_task(model, args, train_loader_current, valid_dataloader, test_loader_current, epochs=args.epochs, task_id=i, epochs_str_only=0)
             # model_p=copy.deepcopy(model)
             valid_acc = test(model, None, valid_dataloader, None, task_id=i)[0].cpu().item()
+            # print(f'debug: valid acc for structure {structure}: {valid_acc}')
             if best_valid_acc is None or best_valid_acc<valid_acc:
                 best_valid_acc = copy.deepcopy(valid_acc)
                 best_model = copy.deepcopy(model)
@@ -402,13 +412,22 @@ def main(args:ArgsGenerator):
         ##########################################
         #3. Add new modules to the model_main if needed   
         print(f"Best structure selected task{i}", best_structure)
+
+        # test_acc = test(best_model, None, test_loader_current, None, task_id=i)[0].cpu().item()
+        # print(f'debug: best_model: test acc (just after the task): {test_acc}')
+
         model_main.add_structure_to_pool(best_structure)
+        # print(f'debug: run valid before change on task0: '
+        #       f'{test(model_main, None, valid_loaders[0], None, task_id=0)[0].cpu().item()}')
         for l, module_idx in enumerate(best_structure):
-            if module_idx>len(model_main.components[l])-1:          
+            if module_idx>len(model_main.components[l])-1:
                 model_main.add_modules(at_layer=l, state_dict=best_model.components[l][-1].state_dict())
+                # model_main.components[l][module_idx].load_state_dict(best_model.components[l][-1].state_dict())
             elif args.copy_batchstats or not model_main.components[l][module_idx].module_learned:
                 model_main.components[l][module_idx].load_state_dict(best_model.components[l][-1].state_dict())
             model_main.components[l][module_idx].freeze_module()
+            # print(f'debug: run valid after change layer{l} on task0: '
+            #       f'{test(model_main, None, valid_loaders[0], None, task_id=0)[0].cpu().item()}')
         
 
         assert isinstance(model_main.decoder, Iterable)
@@ -421,7 +440,7 @@ def main(args:ArgsGenerator):
             raise NotImplementedError
         ##########################################
         test_acc = test(model_main, None, test_loader_current, None, task_id=i if not args.task_agnostic_test else None)[0].cpu().item()
-        print(f'test acc (just after the task): {test_acc}')
+        print(f'model_main: test acc (just after the task): {test_acc}')
         test_accuracies_past.append(test_acc)
         valid_accuracies_past.append(best_valid_acc)
         ####################
