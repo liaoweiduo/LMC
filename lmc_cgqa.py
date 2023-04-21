@@ -712,7 +712,14 @@ def main(args:ArgsGenerator):
         train_loader_current, valid_dataloader, test_loader_current = create_dataloader_cgqa(
             continual_train_benchmark, i, args, batch_size=args.batch_size)
         if args.regime=='cl':
+
             model,test_acc,valid_acc,fim_prev = train(args,model,i,train_loader_current,test_loader_current,valid_dataloader,fim_prev,er_buffer)
+
+            '''debug: just after train'''
+            accs, _, _, _ = get_accs_for_tasks(model, args, test_loaders, task_agnostic_test=False)
+            print(f'debug: just after train: test_acc obtained on training: {test_acc}.')
+            print(f'debug: just after train: accs on past tasks: {accs}.')
+            '''debug: just after train'''
 
             test_accuracies_past.append(test_acc)
             valid_accuracies_past.append(valid_acc)
@@ -751,7 +758,7 @@ def main(args:ArgsGenerator):
             model.fix_oh(i)
             if i < n_tasks - 1:     # do not increase for the last task
                 init_idx=get_oh_init_idx(model, create_dataloader_cgqa(continual_train_benchmark, i+1, args, batch_size=args.batch_size)[0], args)
-                print('init_idx', init_idx)
+                print('add new head: init_idx', init_idx)
                 model.add_output_head(n_classes, init_idx=init_idx)
         else:
             #single head mode: create new, larger head

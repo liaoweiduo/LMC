@@ -208,7 +208,7 @@ def train_on_task(model:nn.Module, args:ArgsGenerator, train_loader, valid_loade
                         best_val = acc_valid
                         best_model = copy.deepcopy(model.state_dict())
                     '''Modify: add early stop'''
-                    if epochs_overfitting <= e - 10:     # patience for 10epochs
+                    if epochs_overfitting <= e - 20:     # patience for 10epochs
                         print(f'early stop at epoch: {e}')
                         break
                 
