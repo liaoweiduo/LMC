@@ -30,6 +30,9 @@ from Utils.logging_utils import mkdir, model_save, model_load
 from Utils.utils import cosine_rampdown
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
+if device == 'cpu':
+    raise Exception(f'device: {device}, speed is too low.')
+
 @dataclass#(eq=True, frozen=False)
 class ArgsGenerator(ArgsGenerator):            
     gating: str = choice('experts', 'locspec', 'MNTDP', default='MNTDP')

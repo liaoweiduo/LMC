@@ -36,6 +36,9 @@ from Utils.utils import cosine_rampdown, set_seed
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
+if device == 'cpu':
+    raise Exception(f'device: {device}, speed is too low.')
+
 
 @dataclass#(eq=True, frozen=False)
 class ArgsGenerator():
