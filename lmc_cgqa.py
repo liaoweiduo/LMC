@@ -159,7 +159,10 @@ class ArgsGenerator():
     n_heads_decoder: int = 1 #-
     ##############################
 
+    # my modification
     redo_final_test:int = 0
+    dataset: str = choice('cgqa', 'cobj', default='cgqa')
+    image_size:int = 128        # for vit, the module structure setting, image_size is not there, but in base_modular.py
 
 
     def __post_init__(self):
@@ -186,24 +189,48 @@ def get_benchmark(mode, args:ArgsGenerator):
     """
     return benchmark according to the mode
     """
-    from Data.cgqa import continual_training_benchmark, fewshot_testing_benchmark
+    if args.dataset == 'cgqa':
+        from Data.cgqa import continual_training_benchmark, fewshot_testing_benchmark
+    # elif args.dataset == 'cobj':
+    #     from Data.cobj import continual_training_benchmark, fewshot_testing_benchmark
+    else:
+        raise Exception(f'un implemented dataset: {args.dataset}')
 
     single_head = (args.multihead == 'none')
     return_task_id = not single_head       # True if task_IL, False if class-IL
 
+    if args.module_type == 'vit_block':
+        from Data.cgqa import build_transform_for_vit
+
+        train_transform = build_transform_for_vit((args.image_size, args.image_size), True)
+        eval_transform = build_transform_for_vit((args.image_size, args.image_size), False)
+    else:
+        train_transform, eval_transform = None, None  # default transform
+
     if mode == 'continual':
         benchmark = continual_training_benchmark(
-            n_experiences=args.n_tasks, return_task_id=return_task_id,
+            n_experiences=args.n_tasks, image_size=(args.image_size, args.image_size),
+            return_task_id=return_task_id,
             seed=1234, shuffle=True,
             dataset_root=args.data_dir,
+            train_transform=train_transform, eval_transform=eval_transform
         )
     else:
+        if args.dataset == 'cgqa':
+            n_way, n_shot, n_val, n_query = 10, 10, 5, 10
+        elif args.dataset == 'cobj':
+            n_way, n_shot, n_val, n_query = 2, 10, 5, 10
+        else:
+            raise Exception(f'un implemented dataset: {args.dataset}')
+
         benchmark = fewshot_testing_benchmark(
-            n_experiences=300, mode=mode,
-            n_way=10, n_shot=10, n_val=5, n_query=10,
-            seed=1234,
+            n_experiences=300, image_size=(args.image_size, args.image_size),
+            mode=mode,
+            n_way=n_way, n_shot=n_shot, n_val=n_val, n_query=n_query,
             task_offset=0,      # reinit classifier, so task id is all 0
+            seed=1234,
             dataset_root=args.data_dir)
+
     return benchmark
 
 
@@ -263,6 +290,7 @@ def init_model(args:ArgsGenerator, gating='locspec', n_classes=10, i_size=28):
         model_options.LMC.init_stats=args.init_runingstats_on_addition
         model_options.LMC.regime='normal'
         model_options.LMC.lr=args.lr
+        model_options.LMC.epochs=args.epochs
         model_options.LMC.wdecay=args.wdecay
         model_options.LMC.depth=args.depth
         model_options.LMC.lr_structural=args.lr_structural

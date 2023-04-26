@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import Optional, Sequence, Union, Any, Dict, List
 import json
 from PIL import Image
-from timm.data import create_transform
 
 import numpy as np
 from torchvision import transforms
@@ -26,57 +25,6 @@ objects defined in json. E.g., "apple,banana".
 """
 
 
-def _build_default_transform(image_size=(128, 228), is_train=True, normalize=True):
-    """
-    Default transforms borrowed from MetaShift.
-    Imagenet normalization.
-    """
-    _train_transform = [
-            transforms.Resize(image_size),  # allow reshape but not equal scaling
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-    ]
-    _eval_transform = [
-            transforms.Resize(image_size),
-            transforms.ToTensor(),
-    ]
-    if normalize:
-        _train_transform.append(transforms.Normalize(
-                mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
-            ))
-        _eval_transform.append(transforms.Normalize(
-                mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
-            ))
-
-    _default_train_transform = transforms.Compose(_train_transform)
-    _default_eval_transform = transforms.Compose(_eval_transform)
-
-    if is_train:
-        return _default_train_transform
-    else:
-        return _default_eval_transform
-
-
-def build_transform_for_vit(img_size=(224, 224), is_train=True):
-    if is_train:
-        _train_transform = create_transform(
-            input_size=img_size,
-            is_training=is_train,
-            color_jitter=0.3,  # 颜色抖动
-            auto_augment='rand-m9-mstd0.5-inc1',
-            interpolation='bicubic',
-            re_prob=0.25,
-            re_mode='pixel',
-            re_count=1,
-        )
-        # replace RandomResizedCropAndInterpolation with Resize, for not cropping img and missing concepts
-        _train_transform.transforms[0] = transforms.Resize(img_size, interpolation=Image.BICUBIC)
-
-        return _train_transform
-    else:
-        return _build_default_transform(img_size, False)
-
-
 def continual_training_benchmark(
         n_experiences: int,
         *,
@@ -89,7 +37,7 @@ def continual_training_benchmark(
         eval_transform: Optional[Any] = None,
         dataset_root: Union[str, Path] = None,
         memory_size: int = 0,
-        num_samples_each_label: Optional[int] = None,
+        num_samples_each_label = None,
 ):
     """
     Creates a CL benchmark using the pre-processed GQA dataset.
@@ -123,8 +71,6 @@ def continual_training_benchmark(
         'tinyimagenet' will be used.
     :param memory_size: Total memory size for store all past classes/tasks.
         Each class has equal number of instances in the memory.
-    :param num_samples_each_label: Number of samples for each label,
-        -1 or None means all data are used.
 
     :returns: A properly initialized instance: `GenericCLScenario`
         with train_stream, val_stream, test_stream.
@@ -132,17 +78,36 @@ def continual_training_benchmark(
     if dataset_root is None:
         dataset_root = './cgqa'
 
+    '''
+    Default transforms borrowed from MetaShift.
+    Imagenet normalization.
+    '''
+    _default_cgqa_train_transform = transforms.Compose(
+        [
+            transforms.Resize(image_size),  # allow reshape but not equal scaling
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize(
+                mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
+            ),
+        ]
+    )
+    _default_cgqa_eval_transform = transforms.Compose(
+        [
+            transforms.Resize(image_size),
+            transforms.ToTensor(),
+            transforms.Normalize(
+                mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
+            ),
+        ]
+    )
     if train_transform is None:
-        train_transform = _build_default_transform(image_size, True)
+        train_transform = _default_cgqa_train_transform
     if eval_transform is None:
-        eval_transform = _build_default_transform(image_size, False)
+        eval_transform = _default_cgqa_eval_transform
 
     '''load datasets'''
-    if num_samples_each_label is None or num_samples_each_label < 0:
-        num_samples_each_label = None
-
-    datasets, label_info = _get_gqa_datasets(dataset_root, mode='continual', image_size=image_size,
-                                             num_samples_each_label=num_samples_each_label)
+    datasets, label_info = _get_gqa_datasets(dataset_root, mode='continual', image_size=image_size, num_samples_each_label=num_samples_each_label)
     train_set, val_set, test_set = datasets['train'], datasets['val'], datasets['test']
     label_set, map_tuple_label_to_int, map_int_label_to_tuple = label_info
 
@@ -150,21 +115,19 @@ def continual_training_benchmark(
     num_classes = len(label_set)
     assert num_classes % n_experiences == 0
     num_class_in_exp = num_classes // n_experiences
-    classes_order = np.array(list(map_int_label_to_tuple.keys())).astype(np.int64)  # [0-99]
+    classes_order = np.array(list(map_int_label_to_tuple.keys()))  # [0-99]
     if fixed_class_order is not None:
         assert len(fixed_class_order) == num_classes
-        classes_order = np.array(fixed_class_order).astype(np.int64)
+        classes_order = np.array(fixed_class_order)
     elif shuffle:
         rng = np.random.RandomState(seed=seed)
         rng.shuffle(classes_order)
 
     original_classes_in_exp = classes_order.reshape([n_experiences, num_class_in_exp])  # e.g.[[5, 2], [6, 10],...]
     if return_task_id:      # task-IL
-        classes_in_exp = np.stack([np.arange(num_class_in_exp) for _ in range(n_experiences)]).astype(np.int64)
-        # [[0,1], [0,1],...]
+        classes_in_exp = np.stack([np.arange(num_class_in_exp) for _ in range(n_experiences)])  # [[0,1], [0,1],...]
     else:
-        classes_in_exp = np.arange(num_classes).reshape([n_experiences, num_class_in_exp]).astype(np.int64)
-        # [[0,1], [2,3],...]
+        classes_in_exp = np.arange(num_classes).reshape([n_experiences, num_class_in_exp])  # [[0,1], [2,3],...]
 
     '''class mapping for each exp, contain the mapping for previous exps (unseen filled with -1)'''
     '''so that it allow memory buffer for previous exps'''
@@ -173,7 +136,7 @@ def continual_training_benchmark(
         class_mapping = np.array([-1] * num_classes)
         class_mapping[original_classes_in_exp[:exp_idx+1].reshape(-1)] = classes_in_exp[:exp_idx+1].reshape(-1)
         class_mappings.append(class_mapping)    # [-1 -1  2 ... -1  6 -1 ... -1  0 -1 ... -1]
-    class_mappings = np.array(class_mappings).astype(np.int64)
+    class_mappings = np.array(class_mappings)
 
     '''get sample indices for each experiment'''
     rng = np.random.RandomState(seed)   # reset rng for memory selection
@@ -301,10 +264,33 @@ def fewshot_testing_benchmark(
     if dataset_root is None:
         dataset_root = './cgqa'
 
+    '''
+    Default transforms borrowed from MetaShift.
+    Imagenet normalization.
+    '''
+    _default_cgqa_train_transform = transforms.Compose(
+        [
+            transforms.Resize(image_size),  # allow reshape but not equal scaling
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize(
+                mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
+            ),
+        ]
+    )
+    _default_cgqa_eval_transform = transforms.Compose(
+        [
+            transforms.Resize(image_size),
+            transforms.ToTensor(),
+            transforms.Normalize(
+                mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
+            ),
+        ]
+    )
     if train_transform is None:
-        train_transform = _build_default_transform(image_size, True)
+        train_transform = _default_cgqa_train_transform
     if eval_transform is None:
-        eval_transform = _build_default_transform(image_size, False)
+        eval_transform = _default_cgqa_eval_transform
 
     '''load datasets'''
     datasets, label_info = _get_gqa_datasets(dataset_root, mode=mode, image_size=image_size)
@@ -323,20 +309,20 @@ def fewshot_testing_benchmark(
 
     if fixed_class_order is not None:
         assert len(fixed_class_order) == n_experiences * n_way
-        selected_classes_in_exp = np.array(fixed_class_order).astype(np.int64).reshape(n_experiences, n_way)
+        selected_classes_in_exp = np.array(fixed_class_order).reshape(n_experiences, n_way)
     else:
         rng = np.random.RandomState(seed=seed)
         for exp_idx in range(n_experiences):
             '''select n_way classes for each exp'''
-            selected_class_idxs = rng.choice(classes_order, n_way, replace=False).astype(np.int64)
+            selected_class_idxs = rng.choice(classes_order, n_way, replace=False)
             selected_classes_in_exp.append(selected_class_idxs)
 
     for exp_idx in range(n_experiences):
         selected_class_idxs = selected_classes_in_exp[exp_idx]
-        classes_in_exp.append(np.arange(n_way).astype(np.int64))
+        classes_in_exp.append(np.arange(n_way))
         class_mapping = np.array([-1] * num_classes)
         class_mapping[selected_class_idxs] = np.arange(n_way)
-        class_mappings.append(class_mapping.astype(np.int64))
+        class_mappings.append(class_mapping)
         task_labels.append(exp_idx + task_offset)
 
     rng = np.random.RandomState(seed)
@@ -651,7 +637,7 @@ class PathsDataset(torch.utils.data.Dataset):
         return len(self.imgs)
 
 
-class Subset(torch.utils.data.dataset.Dataset):
+class Subset(torch.utils.data.Dataset):
     """
     subset with class mapping
     """
@@ -702,6 +688,35 @@ if __name__ == "__main__":
     #     dataset_root='../../datasets',
     #     memory_size=0,
     # )
+    #
+    # '''obtain fixed class order'''
+    # class_exp = _benchmark_instance.original_classes_in_exp
+    # maps = _benchmark_instance.label_info[2]
+    # str_class_exp = []
+    # for classes in class_exp:
+    #     str_class_exp.append([maps[c] for c in classes])
+    # fixed_class_order:
+    # [[('fence', 'flower'), ('door', 'grass'), ('leaves', 'shirt'), ('grass', 'table'), ('shoe', 'shorts'),
+    #   ('hat', 'table'), ('leaves', 'wall'), ('chair', 'grass'), ('door', 'shoe'), ('fence', 'helmet')],
+    #  [('chair', 'sign'), ('grass', 'shorts'), ('hat', 'plate'), ('pole', 'shirt'), ('grass', 'pants'),
+    #   ('pants', 'shoe'), ('pole', 'wall'), ('bench', 'chair'), ('helmet', 'plate'), ('leaves', 'shoe')],
+    #  [('bench', 'shorts'), ('flower', 'pole'), ('chair', 'helmet'), ('pants', 'shorts'), ('helmet', 'shorts'),
+    #   ('helmet', 'shoe'), ('hat', 'jacket'), ('hat', 'shorts'), ('jacket', 'shoe'), ('fence', 'wall')],
+    #  [('bench', 'helmet'), ('hat', 'shirt'), ('bench', 'sign'), ('plate', 'wall'), ('grass', 'plate'),
+    #   ('helmet', 'pole'), ('door', 'leaves'), ('bench', 'pants'), ('grass', 'jacket'), ('jacket', 'pole')],
+    #  [('car', 'jacket'), ('building', 'plate'), ('helmet', 'leaves'), ('pants', 'shirt'), ('car', 'leaves'),
+    #   ('bench', 'leaves'), ('fence', 'pants'), ('bench', 'shirt'), ('fence', 'grass'), ('building', 'jacket')],
+    #  [('fence', 'plate'), ('car', 'helmet'), ('car', 'shorts'), ('grass', 'leaves'), ('jacket', 'shirt'),
+    #   ('chair', 'shirt'), ('plate', 'sign'), ('bench', 'jacket'), ('leaves', 'sign'), ('chair', 'shoe')],
+    #  [('flower', 'shirt'), ('building', 'chair'), ('plate', 'shorts'), ('building', 'leaves'), ('chair', 'hat'),
+    #   ('fence', 'pole'), ('grass', 'sign'), ('building', 'grass'), ('hat', 'shoe'), ('bench', 'wall')],
+    #  [('car', 'flower'), ('bench', 'door'), ('bench', 'hat'), ('bench', 'building'), ('bench', 'table'),
+    #   ('hat', 'sign'), ('shirt', 'wall'), ('door', 'fence'), ('door', 'plate'), ('pole', 'table')],
+    #  [('flower', 'pants'), ('shoe', 'sign'), ('helmet', 'shirt'), ('leaves', 'plate'), ('hat', 'wall'),
+    #   ('grass', 'shoe'), ('plate', 'shirt'), ('pants', 'wall'), ('fence', 'leaves'), ('chair', 'pole')],
+    #  [('car', 'sign'), ('car', 'pants'), ('flower', 'helmet'), ('building', 'hat'), ('car', 'shirt'),
+    #   ('helmet', 'sign'), ('flower', 'wall'), ('door', 'pole'), ('leaves', 'shorts'), ('fence', 'shorts')]]
+
     '''Sys'''
     _dataset, _label_info = _get_gqa_datasets('../../datasets', mode='sys')
 
@@ -710,6 +725,10 @@ if __name__ == "__main__":
     #     task_offset=10,
     #     seed=1234, dataset_root='../../datasets',
     # )
+
+    '''Sub'''
+
+
 
     # from torchvision.transforms import ToPILImage
     # from matplotlib import pyplot as plt

@@ -79,7 +79,8 @@ def init_model(args:ArgsGenerator, gating='MNTDP', n_classes=10, n_modules=1, mu
     model_options.Module.track_running_stats_bn=args.track_running_stats_bn
     model_options.Module.kernel_size = 3
     if gating=='MNTDP':
-        model_options.MNTDP.lr=args.lr     
+        model_options.MNTDP.lr=args.lr
+        model_options.MNTDP.epochs = args.epochs
         model_options.MNTDP.wdecay=args.wdecay
         model_options.MNTDP.regime='normal' 
         model_options.MNTDP.depth=args.depth   
@@ -226,6 +227,10 @@ def train_on_task(model:nn.Module, args:ArgsGenerator, train_loader, valid_loade
 
         # break  # for debug, only train 1 epoch
 
+        # for scheduler to update   epoch-wise
+        if hasattr(model.optimizer, 'scheduler'):
+            model.optimizer.scheduler.step()
+
         e+=1  
     current_epoch = e
     if best_model is not None:
@@ -334,6 +339,8 @@ def main(args:ArgsGenerator):
     x_dim = continual_train_benchmark.x_dim        # 3, 98, 98
     model_main=init_model(args, args.gating, n_classes=n_classes, multihead='usual', i_size=x_dim[-1])
 
+    print('    Total params: %.2fM' % (sum(p.numel() for p in model_main.parameters())/1024 /1024))
+
     """If resume, load model and check nun_task_trained"""
     if os.path.exists(os.path.join(exp_path, 'model.pt')):
         checkpoint = model_load(os.path.join(exp_path, 'model.pt'))
@@ -398,7 +405,7 @@ def main(args:ArgsGenerator):
         #2. Search for the bast model on the given task
         best_valid_acc, best_model, best_structure, best_idx = None, None, None, None
         for _m, (model, structure) in enumerate(search_space):   
-            model.optimizer, _ = model.get_optimizers()       
+            model.optimizer, _ = model.get_optimizers()
             model=train_on_task(model, args, train_loader_current, valid_dataloader, test_loader_current, epochs=args.epochs, task_id=i, epochs_str_only=0)
             # model_p=copy.deepcopy(model)
             valid_acc = test(model, None, valid_dataloader, None, task_id=i)[0].cpu().item()

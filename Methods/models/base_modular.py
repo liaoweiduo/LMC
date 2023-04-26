@@ -177,12 +177,17 @@ class conv_block_base(nn.Module):
         #for HAT        
         n_tasks: Optional[int] = None #number of tasks in the sequence
 
-        patch_size: int = 16  # only for vit_block
-        heads: int = 16  # only for vit_block
-        mlp_dim: int = 512  # only for vit_block
-        vit_dropout: float = 0.1  # only for vit_block
-        emb_dropout: float = 0.1  # only for vit_block
-        dim_head: int = 64  # only for vit_block
+        # only for vit_block
+        patch_size: int = 16
+        heads: int = 16
+        mlp_dim: int = 1536
+        vit_dropout: float = 0.1
+        emb_dropout: float = 0.1
+        dim_head: int = 64
+        image_size: int = 224
+        channels: int = 3
+        pool: str = 'cls'
+        # dim: int = 384    # define in mntdp.py outside
 
     def __init__(self, in_channels, out_channels, i_size, name=None, module_type='conv', n_layers=1, stride=1, bias=True, deeper=False,
                             options:Options=Options(), n_classes=None,
@@ -271,9 +276,33 @@ class conv_block_base(nn.Module):
 
         # ViT block
         elif module_type == 'vit_block':
-            from .vit import T_block
+            from .vit import TBlock, Encoder, pair
             # out_channels is hidden_size
-            self.module = T_block(dim=out_channels, heads=self.args.heads, dim_head=self.args.dim_head, mlp_dim=self.args.mlp_dim, dropout=self.args.vit_dropout)
+            assert 'layer_idx' in self.module_kwargs.keys()
+            module = []
+            if self.module_kwargs['layer_idx'] == 0:         # encoder + (MHA+FF)
+
+                image_height, image_width = pair(self.args.image_size)
+                patch_height, patch_width = pair(self.args.patch_size)
+
+                assert image_height % patch_height == 0 and image_width % patch_width == 0, 'Image dimensions must be divisible by the patch size.'
+
+                num_patches = (image_height // patch_height) * (image_width // patch_width)
+                patch_dim = self.args.channels * patch_height * patch_width
+                assert self.args.pool in {'cls', 'mean'}, 'pool type must be either cls (cls token) or mean (mean pooling)'
+
+                module.append(
+                    Encoder(patch_height, patch_width, patch_dim, out_channels, num_patches, self.args.emb_dropout)
+                )
+                num_layers = 1
+            else:       # (MHA+FF)*2
+                num_layers = 2
+            for _ in range(num_layers):
+                module.append(
+                    TBlock(dim=out_channels, heads=self.args.heads, dim_head=self.args.dim_head,
+                           mlp_dim=self.args.mlp_dim, dropout=self.args.vit_dropout)
+                )
+            self.module = nn.Sequential(*module)
             out_h = 1
 
         elif module_type == 'expert': 
@@ -413,7 +442,8 @@ class ModularBaseNet(nn.Module):
       n_modules:int=1 #numbe rof modules to begin with 
 
       depth: int = 4      #network depth
-      lr: float = 0.01 #meta-learning rate (outer loop)   
+      lr: float = 0.01 #meta-learning rate (outer loop)
+      epochs: int = 20      # for epoch-wise lr scheduler
 
       module_init: str = choice('mean', 'identical', 'existing', 'none', 'previously_active', 'most_likely', default='previously_active')#how to init the modules
 

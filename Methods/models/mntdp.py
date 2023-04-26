@@ -146,7 +146,7 @@ class MNTDP_net(ModularBaseNet):
                             channels_in = out_h*out_h*channels_in
                             out_h=1
                     self.block_constructor=conv_block_base         
-                    conv = self.block_constructor(channels_in, hidden_size, out_h, name=f'components.{i}.{m_i}', module_type=module_type, stride=stride, deeper=deeper, options=self.module_options)
+                    conv = self.block_constructor(channels_in, hidden_size, out_h, name=f'components.{i}.{m_i}', module_type=module_type, layer_idx=i, stride=stride, deeper=deeper, options=self.module_options)
                     self.module_options.dropout=dropout_before                
                     ##################################################
                     ###Initialize all modules in layers identically###   
@@ -259,7 +259,8 @@ class MNTDP_net(ModularBaseNet):
                 ################################################
                 new_module = block_constructor(channels_in, channels, i_size,   
                                                 name=f'components.{l}.{len(layer)}', 
-                                                module_type=module_type, stride=stride, deeper=deeper, options=self.module_options)
+                                                module_type=module_type, layer_idx=l,
+                                               stride=stride, deeper=deeper, options=self.module_options)
 
                 if state_dict is not None:
                     new_module.load_state_dict(state_dict)
@@ -278,6 +279,8 @@ class MNTDP_net(ModularBaseNet):
         # for n, p in self.named_parameters():
         #     print(n, p.is_leaf)
         optimizer = torch.optim.Adam(model_params, lr=self.args.lr, weight_decay=self.args.wdecay)
+        if self.args.module_type == 'vit_block':
+            optimizer.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, self.args.epochs, 1e-6)
         structure_param_groups = []  
         #create module specific parameter groups
         if self.args.module_type!='filterwise':
@@ -322,10 +325,10 @@ class MNTDP_net(ModularBaseNet):
             if self.args.module_type != 'vit_block':
                 X = self.avgpool(X)
             else:
-                x = X.mean(dim=1) if self.pool == 'mean' else X[:, 0]
+                X = X.mean(dim=1) if self.components[0][0].args.pool == 'mean' else X[:, 0]
 
-                x = self.to_latent(x)
-                X = self.mlp_head(x)
+                # X = self.to_latent(X)
+                # X = self.mlp_head(X)
 
             X_flattened = X.reshape(n, -1)   
             if self.args.multihead=='none':
@@ -359,10 +362,10 @@ class MNTDP_net(ModularBaseNet):
                     if self.args.module_type != 'vit_block':
                         X = self.avgpool(X)
                     else:
-                        x = X.mean(dim=1) if self.pool == 'mean' else X[:, 0]
+                        X = X.mean(dim=1) if self.components[0][0].args.pool == 'mean' else X[:, 0]
 
-                        x = self.to_latent(x)
-                        X = self.mlp_head(x)
+                        # X = self.to_latent(X)
+                        # X = self.mlp_head(X)
 
                     X_flattened = X.reshape(n, -1)   
                     if self.args.multihead=='none':
@@ -400,10 +403,10 @@ class MNTDP_net(ModularBaseNet):
                     if self.args.module_type != 'vit_block':
                         X = self.avgpool(X)
                     else:
-                        x = X.mean(dim=1) if self.pool == 'mean' else X[:, 0]
+                        X = X.mean(dim=1) if self.components[0][0].args.pool == 'mean' else X[:, 0]
 
-                        x = self.to_latent(x)
-                        X = self.mlp_head(x)
+                        # X = self.to_latent(X)
+                        # X = self.mlp_head(X)
 
                     X_flattened = X.reshape(n, -1)   
                     if self.args.multihead=='none':

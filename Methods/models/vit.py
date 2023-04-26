@@ -36,7 +36,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 """
 import torch
 from torch import nn
-from avalanche.models import BaseModel, MultiHeadClassifier, IncrementalClassifier, MultiTaskModule, DynamicModule
 
 from einops import rearrange, repeat
 from einops.layers.torch import Rearrange
@@ -47,18 +46,21 @@ Modification: change all nn.LayerNorm -> nn.BatchNorm1d or nn.BatchNorm2d?
 
 # helpers
 
+
 def pair(t):
     return t if isinstance(t, tuple) else (t, t)
 
-# classes
 
+# classes
 class PreNorm(nn.Module):
     def __init__(self, dim, fn):
         super().__init__()
         self.norm = nn.LayerNorm(dim)
         self.fn = fn
+
     def forward(self, x, **kwargs):
         return self.fn(self.norm(x), **kwargs)
+
 
 class FeedForward(nn.Module):
     def __init__(self, dim, hidden_dim, dropout = 0.):
@@ -70,8 +72,10 @@ class FeedForward(nn.Module):
             nn.Linear(hidden_dim, dim),
             nn.Dropout(dropout)
         )
+
     def forward(self, x):
         return self.net(x)
+
 
 class Attention(nn.Module):
     def __init__(self, dim, heads = 8, dim_head = 64, dropout = 0.):
@@ -105,26 +109,59 @@ class Attention(nn.Module):
         out = rearrange(out, 'b h n d -> b n (h d)')
         return self.to_out(out)
 
-class T_block(nn.Module):
-    def __init__(self, dim, heads, dim_head, mlp_dim, dropout = 0.):
+
+class TBlock(nn.Module):
+    def __init__(self, dim, heads, dim_head, mlp_dim, dropout=0.):
         super().__init__()
-        self.attn = PreNorm(dim, Attention(dim, heads = heads, dim_head = dim_head, dropout = dropout))
-        self.ff = PreNorm(dim, FeedForward(dim, mlp_dim, dropout = dropout))
+        self.attn = PreNorm(dim, Attention(dim, heads=heads, dim_head=dim_head, dropout=dropout))
+        self.ff = PreNorm(dim, FeedForward(dim, mlp_dim, dropout=dropout))
+
     def forward(self, x):
         x = self.attn(x) + x
         x = self.ff(x) + x
         return x
+
 
 class Transformer(nn.Module):
     def __init__(self, dim, depth, heads, dim_head, mlp_dim, dropout = 0.):
         super().__init__()
         self.layers = nn.ModuleList([])
         for _ in range(depth):
-            self.layers.append(T_block(dim, heads, dim_head, mlp_dim, dropout))
+            self.layers.append(TBlock(dim, heads, dim_head, mlp_dim, dropout))
+
     def forward(self, x):
         for blk in self.layers:
             x = blk(x)
         return x
+
+
+class Encoder(nn.Module):
+    def __init__(self, patch_height, patch_width, patch_dim, dim, num_patches, emb_dropout):
+        super().__init__()
+        self.to_patch_embedding = nn.Sequential(
+            Rearrange('b c (h p1) (w p2) -> b (h w) (p1 p2 c)', p1=patch_height, p2=patch_width),
+            # nn.BatchNorm1d(num_patches),
+            nn.LayerNorm(patch_dim),
+            nn.Linear(patch_dim, dim),
+            # nn.BatchNorm1d(num_patches),
+            nn.LayerNorm(dim),
+        )
+
+        self.pos_embedding = nn.Parameter(torch.randn(1, num_patches + 1, dim))
+        self.cls_token = nn.Parameter(torch.randn(1, 1, dim))
+        self.dropout = nn.Dropout(emb_dropout)
+
+    def forward(self, img):
+        x = self.to_patch_embedding(img)
+        b, n, _ = x.shape
+
+        cls_tokens = repeat(self.cls_token, '1 1 d -> b 1 d', b=b)
+        x = torch.cat((cls_tokens, x), dim=1)
+        x += self.pos_embedding[:, :(n + 1)]
+        x = self.dropout(x)
+
+        return x
+
 
 class ViT(nn.Module):
     """
@@ -188,108 +225,6 @@ class ViT(nn.Module):
     @property
     def output_size(self):
         return self.dim
-
-
-class DViT(DynamicModule):
-    """
-    ViT with classifier
-    """
-    def __init__(self, image_size=128,
-                 patch_size=16, dim=1024, depth=9, heads=16, mlp_dim=2048, dropout=0.1, emb_dropout=0.1,
-                 initial_out_features: int = 2,
-                 pretrained=False, pretrained_model_path=None, fix=False):
-        super().__init__()
-        self.vit = ViT(
-            image_size=image_size,
-            patch_size=patch_size,
-            dim=dim,
-            depth=depth,
-            heads=heads,
-            mlp_dim=mlp_dim,
-            dropout=dropout,
-            emb_dropout=emb_dropout
-        )
-        self.classifier = IncrementalClassifier(self.vit.output_size, initial_out_features=initial_out_features)
-
-        if pretrained:
-            print('Load pretrained ViT model from {}'.format(pretrained_model_path))
-            ckpt_dict = torch.load(pretrained_model_path)   # , map_location='cuda:0'
-            if 'state_dict' in ckpt_dict:
-                self.vit.load_state_dict(ckpt_dict['state_dict'])
-            else:   # load vit and classifier
-                self.load_state_dict(ckpt_dict)
-
-            # Freeze the parameters of the feature extractor
-            if fix:
-                for param in self.vit.parameters():
-                    param.requires_grad = False
-
-    def forward(self, x):
-        out = self.vit(x)
-        out = out.view(out.size(0), -1)
-        return self.classifier(out)
-
-
-class MTViT(MultiTaskModule, DynamicModule):
-    """
-    MultiTask ViT
-    It employs multi-head output layer
-    """
-    def __init__(self, image_size=128,
-                 patch_size=16, dim=1024, depth=9, heads=16, mlp_dim=2048, dropout=0.1, emb_dropout=0.1,
-                 initial_out_features: int = 2,
-                 pretrained=False, pretrained_model_path=None, fix=False):
-        super().__init__()
-        self.vit = ViT(
-            image_size=image_size,
-            patch_size=patch_size,
-            dim=dim,
-            depth=depth,
-            heads=heads,
-            mlp_dim=mlp_dim,
-            dropout=dropout,
-            emb_dropout=emb_dropout
-        )
-        self.classifier = MultiHeadClassifier(self.vit.output_size, initial_out_features=initial_out_features)
-
-        if pretrained:
-            print('Load pretrained ViT model from {}'.format(pretrained_model_path))
-            ckpt_dict = torch.load(pretrained_model_path)   # , map_location='cuda:0'
-            if 'state_dict' in ckpt_dict:
-                self.vit.load_state_dict(ckpt_dict['state_dict'])
-            else:   # load vit and classifier
-                self.load_state_dict(ckpt_dict)
-
-            # Freeze the parameters of the feature extractor
-            if fix:
-                for param in self.vit.parameters():
-                    param.requires_grad = False
-
-    def forward_single_task(self, x: torch.Tensor, task_label: int) -> torch.Tensor:
-        out = self.vit(x)
-        out = out.view(out.size(0), -1)
-        return self.classifier(out, task_label)
-
-
-def get_vit(
-        image_size=128,
-        multi_head: bool = False,
-        initial_out_features: int = 2, pretrained=False, pretrained_model_path=None, fix=False,
-        patch_size=16, dim=1024, depth=9, heads=16, mlp_dim=2048, dropout=0.1, emb_dropout=0.1
-):
-    if multi_head:
-        return MTViT(image_size, patch_size=patch_size, dim=dim, depth=depth, heads=heads, mlp_dim=mlp_dim,
-                     dropout=dropout, emb_dropout=emb_dropout,
-                     initial_out_features=initial_out_features,
-                     pretrained=pretrained, pretrained_model_path=pretrained_model_path, fix=fix)
-    else:
-        return DViT(image_size, patch_size=patch_size, dim=dim, depth=depth, heads=heads, mlp_dim=mlp_dim,
-                    dropout=dropout, emb_dropout=emb_dropout,
-                    initial_out_features=initial_out_features,
-                    pretrained=pretrained, pretrained_model_path=pretrained_model_path, fix=fix)
-
-
-__all__ = ['DViT', 'MTViT', 'get_vit']
 
 
 if __name__ == '__main__':
