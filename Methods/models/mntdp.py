@@ -125,10 +125,10 @@ class MNTDP_net(ModularBaseNet):
                         hidden_size = [64, 64, 128, 256, 512][i]
                         channels_in = [3, 64, 64, 128, 256][i]
                         stride = [2, 1, 2, 2, 2][i]     # stride[0] no use
-                        assert (self.i_size == 128
-                                ), f"img size should be 128 for the corresponding out_h after each layer, current it is {self.i_size}. manually change the out_h"
-                        if i == 0:
-                            out_h = 63
+                        # assert (self.i_size == 128
+                        #         ), f"img size should be 128 for the corresponding out_h after each layer, current it is {self.i_size}. manually change the out_h"
+                        # if i == 0:
+                        #     out_h = 63
                     else:
                         module_type=self.args.module_type   
 
@@ -426,6 +426,8 @@ class MNTDP_net(ModularBaseNet):
         num_classes = self.num_classes if num_classes is None else num_classes
 
         self.decoder = nn.ModuleList([nn.Linear(self.representation_dim, num_classes).to(device)])
+
+        self.num_classes = num_classes
 
         if self.args.regime=='normal':
             self.optimizer, self.optimizer_structure = self.get_optimizers()

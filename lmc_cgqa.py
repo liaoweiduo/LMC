@@ -136,7 +136,7 @@ class ArgsGenerator():
     #Hparams tuning & training
     regenerate_seed: int = 0 #wether to regenerate seet ad each run
     n_runs:int = 1 # -
-    seed: int = 180 #seed
+    seed: int = 1234 #seed
     debug: int = 0 #debug mode
     early_stop_complete: bool = 0 # it 'True' resets best model to None every time a new module was added during learning a task
     warmup_bn_bf_training: int = 0 # -
@@ -164,8 +164,9 @@ class ArgsGenerator():
 
     # my modification
     redo_final_test:int = 0
-    dataset: str = choice('cgqa', 'cobj', default='cgqa')
+    dataset: str = choice('cgqa', 'cobj', 'scifar100', default='cgqa')
     image_size:int = 128        # for vit, the module structure setting, image_size is not there, but in base_modular.py
+    test_ways:int = 10      # test on specific ways, but not the same as in continual training.
 
 
     def __post_init__(self):
@@ -194,8 +195,10 @@ def get_benchmark(mode, args:ArgsGenerator):
     """
     if args.dataset == 'cgqa':
         from Data.cgqa import continual_training_benchmark, fewshot_testing_benchmark
-    # elif args.dataset == 'cobj':
-    #     from Data.cobj import continual_training_benchmark, fewshot_testing_benchmark
+    elif args.dataset == 'scifar100':
+        from Data.scifar100 import continual_training_benchmark
+    elif args.dataset == 'cobj':
+        from Data.cobj_general import continual_training_benchmark, fewshot_testing_benchmark
     else:
         raise Exception(f'un implemented dataset: {args.dataset}')
 
@@ -214,17 +217,26 @@ def get_benchmark(mode, args:ArgsGenerator):
         benchmark = continual_training_benchmark(
             n_experiences=args.n_tasks, image_size=(args.image_size, args.image_size),
             return_task_id=return_task_id,
-            seed=1234, shuffle=True,
+            seed=args.seed, shuffle=True,
             dataset_root=args.data_dir,
             train_transform=train_transform, eval_transform=eval_transform
         )
     else:
-        if args.dataset == 'cgqa':
-            n_way, n_shot, n_val, n_query = 10, 10, 5, 10
-        elif args.dataset == 'cobj':
-            n_way, n_shot, n_val, n_query = 2, 10, 5, 10
-        else:
-            raise Exception(f'un implemented dataset: {args.dataset}')
+        n_shot, n_val, n_query = 10, 5, 10
+        n_way = args.test_ways      # 10
+        # if args.dataset == 'cgqa':
+        #     n_way = 10
+        # elif args.dataset == 'cobj':
+        #     if args.n_tasks == 3:
+        #         n_way, n_shot, n_val, n_query = 10, 10, 5, 10
+        #     elif args.n_tasks == 10:
+        #         n_way, n_shot, n_val, n_query = 3, 10, 5, 10
+        #     elif args.n_tasks == 5:
+        #         n_way, n_shot, n_val, n_query = 6, 10, 5, 10
+        #     else:       # n_way * n_tasks == 30
+        #         raise Exception('args.n_tasks not implemented')
+        # else:
+        #     raise Exception(f'un implemented dataset: {args.dataset}')
 
         benchmark = fewshot_testing_benchmark(
             n_experiences=300, image_size=(args.image_size, args.image_size),

@@ -266,12 +266,12 @@ class conv_block_base(nn.Module):
                     nn.ReLU(inplace=True),  # relu
                     # nn.MaxPool2d(kernel_size=3, stride=2, padding=1),   # maxpool
                 )
-                out_h = 63
+                out_h = 63      # for 128*128 img
             else:
                 self.module = _make_layer(in_channels, planes=out_channels, blocks=2, stride=stride)    # int(n_layers/2)
-                assert (out_h in [63, 32, 16, 8]
-                        ), f"img size should be 128 for the corresponding out_h after each layer, current out_h is {out_h}. manually change the out_h"
-                # 128*128: [63, 32, 16, 8]; 84*84: [41, 21, 11, 6]
+                # assert (out_h in [63, 32, 16, 8]     # for 128*128 img
+                #         ), f"img size should be 128 for the corresponding out_h after each layer, current out_h is {out_h}. manually change the out_h"
+                # # 128*128: [63, 32, 16, 8]; 84*84: [41, 21, 11, 6]
                 out_h = {64: 63, 128: 32, 256: 16, 512: 8}[out_channels]  # H and W before each layer for 3*128*128.
 
         # ViT block

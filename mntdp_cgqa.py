@@ -151,6 +151,8 @@ def train_on_task(model:nn.Module, args:ArgsGenerator, train_loader, valid_loade
         reg = 0            
         for batch in loader:
             x,y = batch[0].to(device), batch[1].to(device)
+            if len(y) == 1:
+                continue
 
             model.zero_grad()                            
             temp_e = torch.tensor(temp) if not anneal else torch.tensor(temp) * cosine_rampdown(e, epochs+10)
@@ -170,7 +172,9 @@ def train_on_task(model:nn.Module, args:ArgsGenerator, train_loader, valid_loade
                         epochs=max(epochs, e+10) 
                 n_modules_model = copy.deepcopy(model.n_modules)
             logit = forward_out.logit
-            logit=logit.squeeze()                
+            # print(f'logit shape: {logit.shape}')
+            # print(f'y: {y}')
+            logit=logit.squeeze()
             logit = logit[:len(y)]
             if not str_only and e>=_epochs_str_only:
                 outer_loss = loss_function(logit, y)
@@ -339,6 +343,7 @@ def main(args:ArgsGenerator):
     # t = task_gen.add_task()
     continual_train_benchmark = get_benchmark('continual', args)
     n_classes = continual_train_benchmark.n_classes // args.n_tasks         # num class in 1 task: 10
+    print(f'n_classes: {n_classes}')
     x_dim = continual_train_benchmark.x_dim        # 3, 98, 98
     model_main=init_model(args, args.gating, n_classes=n_classes, multihead='usual', i_size=x_dim[-1])
 
@@ -409,7 +414,7 @@ def main(args:ArgsGenerator):
         best_valid_acc, best_model, best_structure, best_idx = None, None, None, None
         for _m, (model, structure) in enumerate(search_space):   
             model.optimizer, _ = model.get_optimizers()
-            model=train_on_task(model, args, train_loader_current, valid_dataloader, test_loader_current, epochs=args.epochs, task_id=i, epochs_str_only=0)
+            model=train_on_task(model, args, train_loader_current, valid_dataloader, test_loader_current, epochs=args.epochs, task_id=i, epochs_str_only=0, classes=range(n_classes))
             # model_p=copy.deepcopy(model)
             valid_acc = test(model, None, valid_dataloader, None, task_id=i)[0].cpu().item()
             # print(f'debug: valid acc for structure {structure}: {valid_acc}')
@@ -550,6 +555,9 @@ def main(args:ArgsGenerator):
         log_wandb({"mean_valid_F":np.mean(Fs_valid)})#, prefix='test/')
         ####################
 
+    if args.dataset == 'scifar100':
+        return None         # do not do few shot testing
+
     '''few-shot testing'''
 
     '''make model freeze'''
@@ -560,15 +568,25 @@ def main(args:ArgsGenerator):
     model_main.args.automated_module_addition = 0
 
     '''reinit model decoder'''
-    model_main.reinit_output_head(n_classes)        # ensure all test are 10 way. only 1 decoder
+    model_main.reinit_output_head(args.test_ways)        # ensure all test are 10 way. only 1 decoder
     '''backup model'''
     model_main_learned = copy.deepcopy(model_main)      # contain structure_pool
 
+    args.lr = 1e-3
+    args.epochs = 20
 
     '''test on different mode'''
-    for mode_id, mode in enumerate(['sys', 'pro', 'sub', 'non', 'noc']):    # 10, 11, 12, 13, 14
-        if mode_id + args.n_tasks <= learned_task_id:                 # pass finished mode
-            continue
+    if args.dataset == 'cgqa':
+        modes = ['sys', 'pro', 'sub', 'non', 'noc']
+    elif args.dataset == 'cobj':
+        modes = ['sys', 'pro', 'non', 'noc']
+    else:
+        raise Exception(f'un implemented dataset {args.dataset}')
+
+    for mode_id, mode in enumerate(modes):    # 10, 11, 12, 13, 14
+        # re do all the test
+        # if mode_id + args.n_tasks <= learned_task_id:                 # pass finished mode
+        #     continue
 
         fewshot_test_benchmark = get_benchmark(mode, args)
         n_tasks = fewshot_test_benchmark.n_experiences      # 300
@@ -614,7 +632,7 @@ def main(args:ArgsGenerator):
                 print(f'choose structure: {structure}.')
                 model.optimizer, _ = model.get_optimizers()
                 model = train_on_task(model, args, train_loader_current, valid_dataloader, test_loader_current,
-                                      epochs=args.epochs, task_id=-1, epochs_str_only=0)
+                                      epochs=args.epochs, task_id=-1, epochs_str_only=0, classes=range(args.test_ways))
                 # model_p=copy.deepcopy(model)
                 valid_acc = test(model, None, valid_dataloader, None, task_id=-1)[0].cpu().item()
                 if best_valid_acc is None or best_valid_acc < valid_acc:
@@ -645,8 +663,7 @@ def main(args:ArgsGenerator):
         model_save(None, args, mode_id + args.n_tasks, os.path.join(exp_path, 'model.pt'))
 
         '''save results'''
-        np.save(os.path.join(exp_path, f'results-{mode}.npy'), np.array(test_accuracies))
-
+        np.save(os.path.join(exp_path, f'results-{mode}-test_ways{args.test_ways}.npy'), np.array(test_accuracies))
 
     return None
 
